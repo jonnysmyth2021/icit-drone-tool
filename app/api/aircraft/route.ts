@@ -37,7 +37,13 @@ export async function GET(request: Request) {
     lomax: safeLomax,
   })
   if (!result.states) {
-    return NextResponse.json({ aircraft: [], authenticated: result.authenticated, unavailable: true })
+    return NextResponse.json({
+      aircraft: [],
+      authenticated: result.authenticated,
+      credentialsConfigured: result.credentialsConfigured,
+      authenticationStatus: result.authenticationStatus,
+      unavailable: true,
+    })
   }
 
   const aircraft = result.states
@@ -63,6 +69,8 @@ export async function GET(request: Request) {
   return NextResponse.json({
     aircraft,
     authenticated: result.authenticated,
+    credentialsConfigured: result.credentialsConfigured,
+    authenticationStatus: result.authenticationStatus,
     updatedAt: new Date().toISOString(),
   })
 }
