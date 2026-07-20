@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { CheckCircle2, FileText, LogOut, Plus } from "lucide-react"
+import { CheckCircle2, LayoutDashboard, LogOut, Plus } from "lucide-react"
+import { toast } from "sonner"
 import { Brand } from "@/components/brand"
 import { StepAltitude } from "@/components/report/step-altitude"
 import { StepEvidence } from "@/components/report/step-evidence"
@@ -23,7 +24,6 @@ import {
   clearSession,
   getSession,
   makeReference,
-  saveReport,
   setSession as persistSession,
   type Session,
 } from "@/lib/store"
@@ -121,9 +121,10 @@ export default function ReportPage() {
     try {
       await createReport(report)
     } catch (err) {
-      console.error("[v0] createReport failed, falling back to local store", err)
-      // Fall back to local persistence so the reporter still gets a confirmation.
-      saveReport(report)
+      console.error("[icit] createReport failed", err)
+      toast.error(err instanceof Error ? err.message : "Unable to submit this report.")
+      setSubmitting(false)
+      return
     }
     setSaved(report)
     setStep("complete")
@@ -135,10 +136,18 @@ export default function ReportPage() {
       <main className="flex min-h-screen flex-col">
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
           <Brand size="sm" />
-          <Button variant="ghost" size="sm" onClick={logout}>
-            <LogOut className="size-4" />
-            Sign out
-          </Button>
+          <div className="flex items-center gap-1">
+            {session.role === "admin" ? (
+              <Button variant="ghost" size="sm" onClick={() => router.push("/review")}>
+                <LayoutDashboard className="size-4" />
+                Dashboard
+              </Button>
+            ) : null}
+            <Button variant="ghost" size="sm" onClick={logout}>
+              <LogOut className="size-4" />
+              Sign out
+            </Button>
+          </div>
         </header>
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-4 py-10 text-center">
           <span className="flex size-16 items-center justify-center rounded-full bg-chart-3/15 text-chart-3">
@@ -165,10 +174,12 @@ export default function ReportPage() {
               <Plus className="size-4" />
               Submit another sighting
             </Button>
-            <Button variant="ghost" onClick={() => router.push("/review")}>
-              <FileText className="size-4" />
-              Reviewer dashboard
-            </Button>
+            {session.role === "admin" ? (
+              <Button variant="secondary" onClick={() => router.push("/review")}>
+                <LayoutDashboard className="size-4" />
+                Open reviewer dashboard
+              </Button>
+            ) : null}
           </div>
         </div>
       </main>

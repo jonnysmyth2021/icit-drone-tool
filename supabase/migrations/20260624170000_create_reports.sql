@@ -1,55 +1,55 @@
 create table if not exists public.reports (
-  id text primary key,
-  reference text not null unique,
+  id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
-  reporter text not null,
-  drone_type text not null,
-  lights_visible text not null,
+  updated_at timestamptz not null default now(),
+  submitted_at timestamptz,
+  user_id uuid references auth.users (id) on delete set null,
+  reporter_id uuid references auth.users (id) on delete set null,
+  session_id text,
+  remote_id jsonb,
+  type text,
+  color text,
+  count integer,
+  height text,
+  has_lights boolean,
+  lights_visible boolean,
   light_colors jsonb not null default '[]'::jsonb,
-  altitude text not null,
-  evidence jsonb not null default '[]'::jsonb,
+  latitude double precision,
+  longitude double precision,
   location jsonb,
-  intelligence jsonb,
+  context jsonb,
+  observation jsonb,
+  capture_metadata jsonb,
+  map_context jsonb,
+  aircraft jsonb,
+  cross_ref_result jsonb,
+  intelligence_summary jsonb,
+  risk_score double precision,
+  risk_level text,
+  risk jsonb,
   status text not null default 'submitted',
-  reviewer_note text,
-  constraint reports_drone_type_check check (drone_type in ('Multi-Rotor', 'Fixed Wing', 'Unknown')),
-  constraint reports_lights_visible_check check (lights_visible in ('Yes', 'No', 'Unknown')),
-  constraint reports_altitude_check check (
-    altitude in (
-      'Below Treeline',
-      'Treeline Height',
-      'Above Treeline',
-      'Above Buildings',
-      'High Altitude',
-      'Unknown'
-    )
-  ),
-  constraint reports_status_check check (status in ('submitted', 'reviewing', 'confirmed', 'rejected'))
+  enriched_at timestamptz,
+  reviewed_at timestamptz,
+  reviewer_notes text,
+  reviewer_action text,
+  draft_expires_at timestamptz
 );
 
 create index if not exists reports_created_at_idx on public.reports (created_at desc);
 create index if not exists reports_status_idx on public.reports (status);
+create index if not exists reports_reporter_id_idx on public.reports (reporter_id);
 
 alter table public.reports enable row level security;
 
-create policy "Observers can insert their own reports"
-  on public.reports
-  for insert
-  to authenticated
-  with check (reporter = auth.jwt() ->> 'email');
+drop policy if exists "Users can submit reports" on public.reports;
+create policy "Users can submit reports"
+  on public.reports for insert to authenticated
+  with check (reporter_id = (select auth.uid()));
 
-create policy "Observers can read their own reports"
-  on public.reports
-  for select
-  to authenticated
-  using (
-    reporter = auth.jwt() ->> 'email'
-    or (auth.jwt() -> 'app_metadata' ->> 'role') in ('admin', 'reviewer')
-  );
+drop policy if exists "Users can read their own reports" on public.reports;
+create policy "Users can read their own reports"
+  on public.reports for select to authenticated
+  using (reporter_id = (select auth.uid()));
 
-create policy "Reviewers can update report decisions"
-  on public.reports
-  for update
-  to authenticated
-  using ((auth.jwt() -> 'app_metadata' ->> 'role') in ('admin', 'reviewer'))
-  with check ((auth.jwt() -> 'app_metadata' ->> 'role') in ('admin', 'reviewer'));
+revoke all on table public.reports from anon;
+grant select, insert on table public.reports to authenticated;

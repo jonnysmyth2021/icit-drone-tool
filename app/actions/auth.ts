@@ -12,6 +12,21 @@ function roleFromMetadata(role: unknown): Session["role"] {
   return role === "admin" || role === "reviewer" ? "admin" : "observer"
 }
 
+async function getApplicationRole(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  metadataRole: unknown,
+): Promise<Session["role"]> {
+  const { data } = await supabase
+    .from("user_profiles")
+    .select("role")
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (data) return data.role === "reviewer" || data.role === "admin" ? "admin" : "observer"
+  return roleFromMetadata(metadataRole)
+}
+
 export async function signInWithPassword(email: string, password: string): Promise<AuthResult> {
   if (!isSupabaseConfigured()) {
     return {
@@ -32,7 +47,7 @@ export async function signInWithPassword(email: string, password: string): Promi
     ok: true,
     session: {
       user: data.user.email ?? email,
-      role: roleFromMetadata(data.user.app_metadata?.role),
+      role: await getApplicationRole(supabase, data.user.id, data.user.app_metadata?.role),
       demo: false,
     },
   }
@@ -56,7 +71,7 @@ export async function getCurrentSession(): Promise<Session | null> {
 
   return {
     user: data.user.email ?? data.user.id,
-    role: roleFromMetadata(data.user.app_metadata?.role),
+    role: await getApplicationRole(supabase, data.user.id, data.user.app_metadata?.role),
     demo: false,
   }
 }

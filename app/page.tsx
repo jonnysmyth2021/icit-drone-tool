@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { ArrowRight, ShieldCheck, Zap } from "lucide-react"
+import { ArrowRight, ShieldCheck } from "lucide-react"
 import { Brand } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -38,16 +38,6 @@ export default function LoginPage() {
 
     setSession(result.session)
     router.push(result.session.role === "admin" ? "/review" : "/report")
-  }
-
-  function demoBypass() {
-    setSession({ user: "demo.observer@icit", role: "observer", demo: true })
-    router.push("/report")
-  }
-
-  function reviewerAccess() {
-    setSession({ user: "reviewer@icit", role: "admin", demo: true })
-    router.push("/review")
   }
 
   return (
@@ -118,33 +108,9 @@ export default function LoginPage() {
             </div>
           </form>
 
-          <div className="my-4 flex items-center gap-3">
-            <div className="h-px flex-1 bg-border" />
-            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              or
-            </span>
-            <div className="h-px flex-1 bg-border" />
-          </div>
-
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full"
-            onClick={demoBypass}
-          >
-            <Zap className="size-4 text-accent" />
-            Continue with demo (bypass login)
-          </Button>
-
           <div className="mt-6 flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
             <ShieldCheck className="size-3.5" />
-            <button
-              type="button"
-              onClick={reviewerAccess}
-              className="underline-offset-4 hover:text-foreground hover:underline"
-            >
-              Reviewer access
-            </button>
+            Reviewer access is granted through your account role.
           </div>
         </div>
       </div>

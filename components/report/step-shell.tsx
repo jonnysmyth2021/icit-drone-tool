@@ -2,8 +2,12 @@
 
 import type React from "react"
 
-import { ChevronLeft } from "lucide-react"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { ChevronLeft, LayoutDashboard } from "lucide-react"
 import { Brand } from "@/components/brand"
+import { Button } from "@/components/ui/button"
+import { getSession } from "@/lib/store"
 
 export function StepShell({
   stepIndex,
@@ -24,27 +28,45 @@ export function StepShell({
   children: React.ReactNode
   footer?: React.ReactNode
 }) {
+  const router = useRouter()
+  const [isReviewer, setIsReviewer] = useState(false)
   const pct = Math.round(((stepIndex + 1) / stepCount) * 100)
+
+  useEffect(() => {
+    setIsReviewer(getSession()?.role === "admin")
+  }, [])
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3">
-          {onBack ? (
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              aria-label="Go back"
-            >
-              <ChevronLeft className="size-5" />
-            </button>
-          ) : (
-            <span className="size-9" />
-          )}
+        <div className="mx-auto grid w-full max-w-md grid-cols-[1fr_auto_1fr] items-center px-4 py-3">
+          <div className="flex justify-start">
+            {onBack ? (
+              <button
+                type="button"
+                onClick={onBack}
+                className="flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                aria-label="Go back"
+              >
+                <ChevronLeft className="size-5" />
+              </button>
+            ) : (
+              <span className="size-9" />
+            )}
+          </div>
           <Brand size="sm" />
-          <span className="w-9 text-right font-mono text-xs text-muted-foreground">
-            {stepIndex + 1}/{stepCount}
-          </span>
+          <div className="flex justify-end">
+            {isReviewer ? (
+              <Button variant="ghost" size="sm" onClick={() => router.push("/review")}>
+                <LayoutDashboard className="size-4" />
+                Dashboard
+              </Button>
+            ) : (
+              <span className="w-9 text-right font-mono text-xs text-muted-foreground">
+                {stepIndex + 1}/{stepCount}
+              </span>
+            )}
+          </div>
         </div>
         <div className="h-0.5 w-full bg-secondary">
           <div

@@ -13,7 +13,7 @@ type LeafletWithHeat = typeof import("leaflet") & {
   heatLayer: (points: HeatPoint[], options?: Record<string, unknown>) => HeatLayer
 }
 
-import type { DroneReport, Verdict } from "@/lib/types"
+import type { AircraftMatch, DroneReport, Verdict } from "@/lib/types"
 import { UK_FLIGHT_RESTRICTION_ZONES, zonesContaining } from "@/lib/uk-frz"
 import {
   AIRSPACE_CATEGORY_COLOR,
@@ -96,9 +96,9 @@ const AIRCRAFT_COLOR = "#facc15"
 /** A top-down plane silhouette (nose pointing up) rotated to the aircraft's true track. */
 function aircraftIconHtml(heading: number | null) {
   const rot = heading ?? 0
-  return `<div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;">
-    <svg viewBox="0 0 24 24" width="30" height="30" style="transform:rotate(${rot}deg);filter:drop-shadow(0 1px 2px rgba(0,0,0,0.85));">
-      <path fill="${AIRCRAFT_COLOR}" stroke="#0f172a" stroke-width="0.8" stroke-linejoin="round" d="M12 2c.7 0 1.2.9 1.2 2.2v4.3l8 4.7v2l-8-2.4v4.5l2.2 1.6v1.6L12 19.8l-3.4 1.5v-1.6l2.2-1.6v-4.5l-8 2.4v-2l8-4.7V4.2C10.8 2.9 11.3 2 12 2z"/>
+  return `<div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:9999px;background:rgba(15,23,42,0.88);border:2px solid ${AIRCRAFT_COLOR};box-shadow:0 2px 8px rgba(0,0,0,0.55);">
+    <svg viewBox="0 0 24 24" width="34" height="34" style="transform:rotate(${rot}deg);filter:drop-shadow(0 1px 2px rgba(0,0,0,0.85));">
+      <path fill="${AIRCRAFT_COLOR}" stroke="#ffffff" stroke-width="0.65" stroke-linejoin="round" d="M12 2c.7 0 1.2.9 1.2 2.2v4.3l8 4.7v2l-8-2.4v4.5l2.2 1.6v1.6L12 19.8l-3.4 1.5v-1.6l2.2-1.6v-4.5l-8 2.4v-2l8-4.7V4.2C10.8 2.9 11.3 2 12 2z"/>
     </svg>
   </div>`
 }
@@ -119,6 +119,7 @@ export function ReportsMap({
   const frzRef = useRef<L.LayerGroup | null>(null)
   const heatRef = useRef<HeatLayer | null>(null)
   const aircraftRef = useRef<L.LayerGroup | null>(null)
+  const aircraftFittedRef = useRef(false)
   const uasRef = useRef<L.GeoJSON | null>(null)
   const showUasRef = useRef(false)
   const nsaRef = useRef<L.GeoJSON | null>(null)
@@ -129,11 +130,15 @@ export function ReportsMap({
   const [ready, setReady] = useState(false)
   const [showFrz, setShowFrz] = useState(true)
   const [showHeat, setShowHeat] = useState(false)
-  const [showAircraft, setShowAircraft] = useState(false)
+  const [showAircraft, setShowAircraft] = useState(true)
   const [showUas, setShowUas] = useState(false)
   const [showNsa, setShowNsa] = useState(false)
   const [showSites, setShowSites] = useState(false)
   const [aircraftCount, setAircraftCount] = useState<number | null>(null)
+  const [liveAircraft, setLiveAircraft] = useState<AircraftMatch[]>([])
+  const [aircraftUpdatedAt, setAircraftUpdatedAt] = useState<string | null>(null)
+  const [aircraftUnavailable, setAircraftUnavailable] = useState(false)
+  const [aircraftViewportRevision, setAircraftViewportRevision] = useState(0)
   const [zoom, setZoom] = useState(5)
 
   // Init map once.
@@ -209,6 +214,7 @@ export function ReportsMap({
 
       markersRef.current = L.layerGroup().addTo(map)
       map.on("zoomend", () => setZoom(map.getZoom()))
+      map.on("moveend", () => setAircraftViewportRevision((revision) => revision + 1))
       mapRef.current = map
       setZoom(map.getZoom())
       setReady(true)
@@ -247,8 +253,49 @@ export function ReportsMap({
     else map.removeLayer(heat)
   }, [showHeat, ready])
 
-  // Aircraft-at-report-time layer: plot the aircraft that each report's
-  // intelligence assessment captured from OpenSky *at the moment of reporting*.
+  // Fetch live OpenSky traffic around the current viewport and refresh it.
+  useEffect(() => {
+    if (!showAircraft || !ready) return
+    let cancelled = false
+
+    async function refreshAircraft() {
+      const map = mapRef.current
+      if (!map) return
+      const bounds = map.getBounds()
+      const center = bounds.getCenter()
+      const latRadius = Math.max(0.25, (bounds.getNorth() - bounds.getSouth()) / 2)
+      const lngRadius = Math.max(0.25, (bounds.getEast() - bounds.getWest()) / 2)
+      const params = new URLSearchParams({
+        lamin: String(center.lat - latRadius),
+        lomin: String(center.lng - lngRadius),
+        lamax: String(center.lat + latRadius),
+        lomax: String(center.lng + lngRadius),
+      })
+      try {
+        const response = await fetch(`/api/aircraft?${params.toString()}`, { cache: "no-store" })
+        const data = (await response.json()) as {
+          aircraft?: AircraftMatch[]
+          updatedAt?: string
+        }
+        if (cancelled) return
+        setLiveAircraft(Array.isArray(data.aircraft) ? data.aircraft : [])
+        setAircraftUpdatedAt(data.updatedAt ?? new Date().toISOString())
+        setAircraftUnavailable(!response.ok)
+      } catch {
+        if (!cancelled) setAircraftUnavailable(true)
+      }
+    }
+
+    const initial = window.setTimeout(() => void refreshAircraft(), 350)
+    const interval = window.setInterval(() => void refreshAircraft(), 30_000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(initial)
+      window.clearInterval(interval)
+    }
+  }, [showAircraft, ready, aircraftViewportRevision])
+
+  // Render the current live aircraft state.
   useEffect(() => {
     const L = leafletRef.current
     const map = mapRef.current
@@ -260,25 +307,20 @@ export function ReportsMap({
     if (!showAircraft) {
       map.removeLayer(layer)
       setAircraftCount(null)
+      aircraftFittedRef.current = false
       return
     }
 
     layer.addTo(map)
     let plotted = 0
 
-    for (const r of reports) {
-      const nearby = r.intelligence?.aircraftNearby ?? []
-      const reportTime = new Date(r.intelligence?.generatedAt ?? r.createdAt).toLocaleString(
-        "en-GB",
-        { dateStyle: "short", timeStyle: "short" },
-      )
-      for (const a of nearby) {
-        if (typeof a.lat !== "number" || typeof a.lng !== "number") continue
+    for (const a of liveAircraft) {
+      if (typeof a.lat !== "number" || typeof a.lng !== "number") continue
         const icon = L.divIcon({
           className: "",
           html: aircraftIconHtml(a.headingDeg),
-          iconSize: [32, 32],
-          iconAnchor: [16, 16],
+          iconSize: [44, 44],
+          iconAnchor: [22, 22],
         })
         const altFt = a.altitudeM != null ? Math.round(a.altitudeM * 3.281) : null
         const spdKt = a.velocityMs != null ? Math.round(a.velocityMs * 1.944) : null
@@ -287,17 +329,33 @@ export function ReportsMap({
             `<strong>${a.callsign}</strong> · ${a.origin}` +
               (altFt != null ? `<br/>${altFt.toLocaleString()} ft` : "") +
               (spdKt != null ? ` · ${spdKt} kt` : "") +
-              `<br/><span style="opacity:0.7">${a.distanceKm} km from ${r.reference}</span>` +
-              `<br/><span style="opacity:0.7">At report time · ${reportTime}</span>`,
+              `<br/><span style="opacity:0.7">Live OpenSky position</span>` +
+              (aircraftUpdatedAt
+                ? `<br/><span style="opacity:0.7">Updated ${new Date(aircraftUpdatedAt).toLocaleTimeString("en-GB")}</span>`
+                : ""),
             { direction: "top" },
           )
           .addTo(layer)
         plotted++
-      }
     }
 
     setAircraftCount(plotted)
-  }, [showAircraft, reports, ready])
+
+    if (plotted > 0 && !aircraftFittedRef.current) {
+      const points = [
+        ...reports
+          .filter((report) => report.location)
+          .map((report) => [report.location.lat, report.location.lng] as [number, number]),
+        ...liveAircraft
+          .filter((aircraft) => typeof aircraft.lat === "number" && typeof aircraft.lng === "number")
+          .map((aircraft) => [aircraft.lat!, aircraft.lng!] as [number, number]),
+      ]
+      if (points.length > 1) {
+        aircraftFittedRef.current = true
+        map.fitBounds(L.latLngBounds(points), { padding: [56, 56], maxZoom: 12 })
+      }
+    }
+  }, [showAircraft, liveAircraft, aircraftUpdatedAt, reports, ready])
 
   // Toggle UAS restrictions layer visibility. The layer may still be loading
   // when this runs, so the load callback also consults showUasRef.
@@ -448,10 +506,13 @@ export function ReportsMap({
           >
             <Plane className="size-3.5 shrink-0" />
             <span className="flex-1 text-left">
-              Aircraft at report time
+              Live aircraft
               {showAircraft && aircraftCount != null && (
                 <span className="ml-1 text-muted-foreground">({aircraftCount})</span>
               )}
+              {showAircraft && aircraftUnavailable ? (
+                <span className="ml-1 text-destructive">unavailable</span>
+              ) : null}
             </span>
             <Check
               className={cn("size-3.5 shrink-0 transition-opacity", showAircraft ? "opacity-100" : "opacity-0")}
@@ -548,7 +609,7 @@ export function ReportsMap({
           {showAircraft && (
             <li className="flex items-center gap-1.5">
               <Plane className="size-3 text-foreground" aria-hidden />
-              <span className="text-foreground">Aircraft at report time (OpenSky)</span>
+              <span className="text-foreground">Live aircraft (OpenSky)</span>
             </li>
           )}
           {showUas && (

@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { BarChart3, ChevronLeft, ListChecks, LogOut, RadioTower, RefreshCw, Search, ShieldAlert, ShieldCheck, X } from "lucide-react"
+import { BarChart3, ChevronLeft, ListChecks, LogOut, Plus, RadioTower, RefreshCw, Search, ShieldAlert, ShieldCheck, X } from "lucide-react"
 
 import { Brand } from "@/components/brand"
 import { ReportDetail } from "@/components/review/report-detail"
@@ -17,7 +17,7 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import { clearSession, getReports, getSession, setSession, updateReport } from "@/lib/store"
+import { clearSession, getSession, setSession } from "@/lib/store"
 import { listReports, setReportStatus } from "@/app/actions/reports"
 import { getCurrentSession, signOut } from "@/app/actions/auth"
 import type { DroneReport, ReportStatus } from "@/lib/types"
@@ -79,7 +79,7 @@ export default function ReviewPage() {
       setReports(await listReports())
     } catch (err) {
       console.error("[v0] failed to load reports", err)
-      setReports(getReports())
+      setReports([])
     } finally {
       setLoading(false)
     }
@@ -124,7 +124,7 @@ export default function ReviewPage() {
       await setReportStatus(id, status, note)
     } catch (err) {
       console.error("[v0] failed to update status", err)
-      updateReport(id, { status, ...(note !== undefined ? { reviewerNote: note } : {}) })
+      await refresh()
     }
   }
 
@@ -132,12 +132,6 @@ export default function ReviewPage() {
     void signOut()
     clearSession()
     router.replace("/")
-  }
-
-  function enterReviewerMode() {
-    setSession({ user: "reviewer@icit", role: "admin", demo: true })
-    setAuthorized(true)
-    void refresh()
   }
 
   if (authorized === null) {
@@ -157,16 +151,10 @@ export default function ReviewPage() {
           The Review Dashboard is only accessible to ICIT reviewers. Enter reviewer access to triage
           submitted sightings, or return to reporting.
         </p>
-        <div className="flex flex-col items-center gap-2">
-          <Button onClick={enterReviewerMode}>
-            <ShieldCheck className="size-4" />
-            Enter reviewer access
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => router.replace("/report")}>
-            <ChevronLeft className="size-4" />
-            Back to reporting
-          </Button>
-        </div>
+        <Button variant="ghost" size="sm" onClick={() => router.replace("/report")}>
+          <ChevronLeft className="size-4" />
+          Back to reporting
+        </Button>
       </main>
     )
   }
@@ -182,6 +170,10 @@ export default function ReviewPage() {
             </span>
           </div>
           <div className="flex items-center gap-1">
+            <Button variant="secondary" size="sm" onClick={() => router.push("/report")}>
+              <Plus className="size-4" />
+              <span className="hidden sm:inline">New sighting</span>
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading}>
               <RefreshCw className={cn("size-4", loading && "animate-spin")} />
               <span className="hidden sm:inline">Refresh</span>
