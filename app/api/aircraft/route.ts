@@ -21,12 +21,23 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid bounding box" }, { status: 400 })
   }
 
-  const result = await fetchOpenSkyStates({ lamin, lomin, lamax, lomax })
+  // Defend the upstream service even if an older client sends a very large
+  // viewport. A 4° × 4° regional box is ample for the operational map.
+  const centerLat = (lamin + lamax) / 2
+  const centerLng = (lomin + lomax) / 2
+  const safeLamin = Math.max(-90, centerLat - Math.min(2, (lamax - lamin) / 2))
+  const safeLamax = Math.min(90, centerLat + Math.min(2, (lamax - lamin) / 2))
+  const safeLomin = Math.max(-180, centerLng - Math.min(2, (lomax - lomin) / 2))
+  const safeLomax = Math.min(180, centerLng + Math.min(2, (lomax - lomin) / 2))
+
+  const result = await fetchOpenSkyStates({
+    lamin: safeLamin,
+    lomin: safeLomin,
+    lamax: safeLamax,
+    lomax: safeLomax,
+  })
   if (!result.states) {
-    return NextResponse.json(
-      { aircraft: [], authenticated: result.authenticated, unavailable: true },
-      { status: 503 },
-    )
+    return NextResponse.json({ aircraft: [], authenticated: result.authenticated, unavailable: true })
   }
 
   const aircraft = result.states

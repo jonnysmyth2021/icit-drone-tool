@@ -263,8 +263,11 @@ export function ReportsMap({
       if (!map) return
       const bounds = map.getBounds()
       const center = bounds.getCenter()
-      const latRadius = Math.max(0.25, (bounds.getNorth() - bounds.getSouth()) / 2)
-      const lngRadius = Math.max(0.25, (bounds.getEast() - bounds.getWest()) / 2)
+      // OpenSky becomes slow or rejects country/continent-sized boxes. At low
+      // zoom levels query a regional window around the map centre; panning the
+      // map refreshes that window automatically.
+      const latRadius = Math.min(2, Math.max(0.25, (bounds.getNorth() - bounds.getSouth()) / 2))
+      const lngRadius = Math.min(2, Math.max(0.25, (bounds.getEast() - bounds.getWest()) / 2))
       const params = new URLSearchParams({
         lamin: String(center.lat - latRadius),
         lomin: String(center.lng - lngRadius),
@@ -276,11 +279,12 @@ export function ReportsMap({
         const data = (await response.json()) as {
           aircraft?: AircraftMatch[]
           updatedAt?: string
+          unavailable?: boolean
         }
         if (cancelled) return
         setLiveAircraft(Array.isArray(data.aircraft) ? data.aircraft : [])
         setAircraftUpdatedAt(data.updatedAt ?? new Date().toISOString())
-        setAircraftUnavailable(!response.ok)
+        setAircraftUnavailable(!response.ok || data.unavailable === true)
       } catch {
         if (!cancelled) setAircraftUnavailable(true)
       }
