@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Check, Loader2, Plane, Radar, Satellite, Send, Sparkles } from "lucide-react"
+import { AlertTriangle, Check, Loader2, Plane, Radar, RotateCcw, Satellite, Send, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { IntelligenceAssessment, ReportLocation } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -19,6 +19,7 @@ export function StepIntelligence({
   stepIndex,
   stepCount,
   location,
+  observation,
   assessment,
   onComplete,
   onSubmit,
@@ -28,6 +29,7 @@ export function StepIntelligence({
   stepIndex: number
   stepCount: number
   location?: ReportLocation
+  observation: Record<string, unknown>
   assessment: IntelligenceAssessment | null
   onComplete: (a: IntelligenceAssessment) => void
   onSubmit: () => void
@@ -36,6 +38,8 @@ export function StepIntelligence({
 }) {
   const [phase, setPhase] = useState(0)
   const [done, setDone] = useState(Boolean(assessment))
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
   const started = useRef(false)
 
   useEffect(() => {
@@ -52,8 +56,12 @@ export function StepIntelligence({
         const res = await fetch("/api/intelligence", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lat: location?.lat, lng: location?.lng }),
+          body: JSON.stringify({ lat: location?.lat, lng: location?.lng, observation }),
         })
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: string } | null
+          throw new Error(body?.error ?? "AI assessment failed.")
+        }
         const data = (await res.json()) as IntelligenceAssessment
         // Ensure the animation has had a moment to play.
         timers.push(
@@ -62,9 +70,14 @@ export function StepIntelligence({
             onComplete(data)
           }, 3200),
         )
-      } catch {
+      } catch (requestError) {
         timers.push(
           setTimeout(() => {
+            setError(
+              requestError instanceof Error
+                ? requestError.message
+                : "AI assessment is temporarily unavailable.",
+            )
             setDone(true)
           }, 3200),
         )
@@ -73,7 +86,15 @@ export function StepIntelligence({
 
     return () => timers.forEach(clearTimeout)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [attempt])
+
+  function retry() {
+    started.current = false
+    setPhase(0)
+    setDone(false)
+    setError(null)
+    setAttempt((value) => value + 1)
+  }
 
   return (
     <StepShell
@@ -92,7 +113,17 @@ export function StepIntelligence({
         ) : undefined
       }
     >
-      {!done || !assessment ? (
+      {error ? (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-5 text-center">
+          <AlertTriangle className="mx-auto size-7 text-destructive" />
+          <h2 className="mt-3 font-semibold">AI assessment unavailable</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+          <Button variant="secondary" className="mt-4" onClick={retry}>
+            <RotateCcw className="size-4" />
+            Retry assessment
+          </Button>
+        </div>
+      ) : !done || !assessment ? (
         <ul className="flex flex-col gap-3">
           {PHASES.map((p, i) => {
             const active = i === phase
@@ -148,6 +179,47 @@ function AssessmentResult({ assessment }: { assessment: IntelligenceAssessment }
         </div>
         <p className="mt-3 text-sm leading-relaxed text-foreground">{assessment.summary}</p>
       </div>
+
+      {assessment.probabilities ? (
+        <div className="rounded-xl border border-border bg-card/70 p-4">
+          <p className="mb-3 text-sm font-medium">AI probability comparison</p>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              ["Drone", assessment.probabilities.drone],
+              ["Aircraft", assessment.probabilities.aircraft],
+              ["Astronomical", assessment.probabilities.astronomical],
+              ["Insufficient data", assessment.probabilities.inconclusive],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="rounded-lg bg-secondary/60 p-3">
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="mt-1 font-mono text-lg font-semibold text-primary">
+                  {Math.round(Number(value) * 100)}%
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {assessment.reasoningFactors?.length ? (
+        <div className="rounded-xl border border-border bg-card/70 p-4">
+          <p className="mb-2 text-sm font-medium">AI evidence factors</p>
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            {assessment.reasoningFactors.map((factor) => (
+              <li key={factor} className="flex gap-2">
+                <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary" />
+                <span>{factor}</span>
+              </li>
+            ))}
+          </ul>
+          {assessment.recommendedAction ? (
+            <p className="mt-3 border-t border-border pt-3 text-sm">
+              <span className="font-medium">Recommended action:</span>{" "}
+              <span className="text-muted-foreground">{assessment.recommendedAction}</span>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="rounded-xl border border-border bg-card/70 p-4">
         <div className="mb-2 flex items-center gap-2 text-sm font-medium">

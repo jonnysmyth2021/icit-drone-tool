@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { ArrowRight, ShieldCheck } from "lucide-react"
+import { ArrowRight } from "lucide-react"
 import { Brand } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -108,10 +108,6 @@ export default function LoginPage() {
             </div>
           </form>
 
-          <div className="mt-6 flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
-            <ShieldCheck className="size-3.5" />
-            Reviewer access is granted through your account role.
-          </div>
         </div>
       </div>
     </main>

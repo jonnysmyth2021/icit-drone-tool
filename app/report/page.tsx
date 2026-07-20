@@ -256,6 +256,23 @@ export default function ReportPage() {
           stepIndex={5}
           stepCount={STEP_COUNT}
           location={draft.location}
+          observation={{
+            droneType: draft.droneType ?? "Unknown",
+            lightsVisible: draft.lightsVisible ?? "Unknown",
+            lightColors: draft.lightColors,
+            altitude: draft.altitude ?? "Unknown",
+            evidenceCount: draft.evidence.length,
+            evidence: draft.evidence.map((item) => ({
+              kind: item.kind,
+              mimeType: item.mimeType,
+              source: item.source,
+              capturedAt: item.capturedAt,
+              metadata: item.metadata,
+            })),
+            bearing: draft.location?.bearing ?? null,
+            deviceHeading: draft.location?.deviceHeading ?? null,
+            locationAccuracyM: draft.location?.accuracy ?? null,
+          }}
           assessment={draft.intelligence ?? null}
           onComplete={(a: IntelligenceAssessment) =>
             setDraft((d) => ({ ...d, intelligence: a }))

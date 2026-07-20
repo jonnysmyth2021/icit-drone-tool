@@ -4,7 +4,6 @@ import type {
   AircraftMatch,
   AstronomyMatch,
   IntelligenceAssessment,
-  Verdict,
 } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
@@ -101,54 +100,120 @@ function getCelestial(lat: number, lng: number): AstronomyMatch[] {
   ]
 }
 
-function buildVerdict(
-  aircraft: AircraftMatch[],
-  astronomy: AstronomyMatch[],
-): { verdict: Verdict; confidence: number; summary: string } {
-  const closest = aircraft[0]
-  const issOverhead = astronomy.some(
-    (a) => a.type === "satellite" && (a.distanceKm ?? Infinity) < 1200,
-  )
+type AiAssessment = Pick<
+  IntelligenceAssessment,
+  "verdict" | "confidence" | "summary" | "probabilities" | "reasoningFactors" | "recommendedAction"
+>
 
-  if (closest && closest.distanceKm <= 4) {
-    return {
-      verdict: "possible_aircraft",
-      confidence: Math.min(0.92, 0.6 + (4 - closest.distanceKm) * 0.08),
-      summary: `Tracked aircraft ${closest.callsign} is only ${closest.distanceKm} km away${
-        closest.altitudeM ? ` at ${Math.round(closest.altitudeM)} m` : ""
-      }. The sighting may be crewed aviation rather than a drone.`,
+async function assessWithOpenAI(input: Record<string, unknown>): Promise<AiAssessment> {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured.")
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 25_000)
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_INTELLIGENCE_MODEL ?? "gpt-5.4-mini",
+        store: false,
+        input: [
+          {
+            role: "system",
+            content:
+              "You are an aviation safety intelligence classifier for reported drone sightings. " +
+              "Assess only the supplied observations and grounded external data. Compare four hypotheses: " +
+              "uncrewed aircraft (drone), tracked crewed aircraft, astronomical object, and insufficient evidence. " +
+              "Do not treat missing provider data as evidence for a drone. Account for aircraft distance, altitude, " +
+              "heading and speed; observer bearing and altitude estimate; reported lights; timing; astronomy; and source health. " +
+              "Probabilities must be calibrated, sum approximately to 1, and uncertainty must remain high when evidence is sparse. " +
+              "The verdict must match the strongest supported hypothesis, using inconclusive when evidence is not discriminating. " +
+              "Write a concise operational summary and concrete reviewer action. Never claim certainty or identify an object without evidence.",
+          },
+          { role: "user", content: JSON.stringify(input) },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "drone_intelligence_assessment",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                verdict: {
+                  type: "string",
+                  enum: [
+                    "likely_drone",
+                    "possible_aircraft",
+                    "possible_astronomical",
+                    "inconclusive",
+                  ],
+                },
+                confidence: { type: "number", minimum: 0, maximum: 1 },
+                probabilities: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    drone: { type: "number", minimum: 0, maximum: 1 },
+                    aircraft: { type: "number", minimum: 0, maximum: 1 },
+                    astronomical: { type: "number", minimum: 0, maximum: 1 },
+                    inconclusive: { type: "number", minimum: 0, maximum: 1 },
+                  },
+                  required: ["drone", "aircraft", "astronomical", "inconclusive"],
+                },
+                summary: { type: "string" },
+                reasoningFactors: {
+                  type: "array",
+                  minItems: 2,
+                  maxItems: 6,
+                  items: { type: "string" },
+                },
+                recommendedAction: { type: "string" },
+              },
+              required: [
+                "verdict",
+                "confidence",
+                "probabilities",
+                "summary",
+                "reasoningFactors",
+                "recommendedAction",
+              ],
+            },
+          },
+        },
+      }),
+    })
+
+    const result = (await response.json()) as {
+      error?: { message?: string }
+      output?: { content?: { type?: string; text?: string }[] }[]
     }
-  }
-  if (issOverhead) {
-    return {
-      verdict: "possible_astronomical",
-      confidence: 0.55,
-      summary:
-        "The ISS ground track is close to this location. A single, steadily moving light could be the space station.",
-    }
-  }
-  if (closest && closest.distanceKm <= 12) {
-    return {
-      verdict: "inconclusive",
-      confidence: 0.45,
-      summary: `Nearest tracked aircraft is ${closest.distanceKm} km away — far enough that a low, manoeuvring object is more consistent with a drone, but aviation cannot be fully ruled out.`,
-    }
-  }
-  return {
-    verdict: "likely_drone",
-    confidence: 0.78,
-    summary:
-      "No crewed aircraft are operating close to the sighting and no bright satellite is overhead. The observation is consistent with an uncrewed aircraft (drone).",
+    if (!response.ok) throw new Error(result.error?.message ?? "OpenAI assessment failed.")
+    const outputText = result.output
+      ?.flatMap((item) => item.content ?? [])
+      .find((content) => content.type === "output_text")?.text
+    if (!outputText) throw new Error("OpenAI returned no structured assessment.")
+    return JSON.parse(outputText) as AiAssessment
+  } finally {
+    clearTimeout(timeout)
   }
 }
 
 export async function POST(request: Request) {
   let lat = 51.5072
   let lng = -0.1276
+  let observation: Record<string, unknown> = {}
   try {
     const body = await request.json()
     if (typeof body.lat === "number") lat = body.lat
     if (typeof body.lng === "number") lng = body.lng
+    if (body.observation && typeof body.observation === "object") observation = body.observation
   } catch {
     // use defaults
   }
@@ -166,12 +231,34 @@ export async function POST(request: Request) {
 
   const aircraftSafe = aircraft ?? []
   const astronomy = [...iss, ...celestial]
-  const { verdict, confidence, summary } = buildVerdict(aircraftSafe, astronomy)
+  let ai: AiAssessment
+  try {
+    ai = await assessWithOpenAI({
+      sighting: {
+        location: { lat, lng },
+        observedAt: new Date().toISOString(),
+        ...observation,
+      },
+      aircraft: aircraftSafe,
+      astronomy,
+      sourceHealth: sources,
+    })
+    sources.push({ name: "OpenAI grounded classifier", status: "ok" })
+  } catch (error) {
+    console.error("[intelligence] OpenAI assessment failed", error)
+    sources.push({ name: "OpenAI grounded classifier", status: "error" })
+    return NextResponse.json(
+      {
+        error: "AI assessment is temporarily unavailable. Please retry.",
+        dataSources: sources,
+      },
+      { status: 503 },
+    )
+  }
 
   const assessment: IntelligenceAssessment = {
-    verdict,
-    confidence: Number(confidence.toFixed(2)),
-    summary,
+    ...ai,
+    confidence: Number(ai.confidence.toFixed(2)),
     aircraftNearby: aircraftSafe,
     astronomyMatches: astronomy,
     generatedAt: new Date().toISOString(),

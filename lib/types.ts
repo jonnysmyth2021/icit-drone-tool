@@ -64,6 +64,14 @@ export interface IntelligenceAssessment {
   verdict: Verdict
   confidence: number
   summary: string
+  probabilities?: {
+    drone: number
+    aircraft: number
+    astronomical: number
+    inconclusive: number
+  }
+  reasoningFactors?: string[]
+  recommendedAction?: string
   aircraftNearby: AircraftMatch[]
   astronomyMatches: AstronomyMatch[]
   generatedAt: string
