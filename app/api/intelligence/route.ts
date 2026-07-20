@@ -7,6 +7,7 @@ import type {
 } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
+export const preferredRegion = "lhr1"
 
 function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number) {
   const R = 6371

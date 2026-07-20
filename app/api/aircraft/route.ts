@@ -4,6 +4,7 @@ import { fetchOpenSkyStates } from "@/lib/opensky"
 import type { AircraftMatch } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
+export const preferredRegion = "lhr1"
 
 function numberParam(value: string | null, fallback: number) {
   const parsed = Number(value)
