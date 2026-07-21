@@ -18,14 +18,31 @@ function logOpenSky(event: string, details: Record<string, unknown>) {
 function serializeError(error: unknown) {
   if (!(error instanceof Error)) return { message: String(error) }
 
-  const cause = error.cause
+  const cause = error.cause as
+    | (Error & {
+        code?: unknown
+        errno?: unknown
+        syscall?: unknown
+        address?: unknown
+        port?: unknown
+      })
+    | undefined
   return {
     name: error.name,
     message: error.message,
     stack: error.stack,
     cause:
       cause instanceof Error
-        ? { name: cause.name, message: cause.message, stack: cause.stack }
+        ? {
+            name: cause.name,
+            message: cause.message,
+            code: cause.code,
+            errno: cause.errno,
+            syscall: cause.syscall,
+            address: cause.address,
+            port: cause.port,
+            stack: cause.stack,
+          }
         : cause == null
           ? undefined
           : String(cause),
