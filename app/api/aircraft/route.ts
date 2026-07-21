@@ -4,7 +4,6 @@ import { fetchOpenSkyStates } from "@/lib/opensky"
 import type { AircraftMatch } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
-export const preferredRegion = "lhr1"
 
 function numberParam(value: string | null, fallback: number) {
   const parsed = Number(value)
@@ -38,13 +37,21 @@ export async function GET(request: Request) {
     lomax: safeLomax,
   })
   if (!result.states) {
-    return NextResponse.json({
+    const responseBody = {
       aircraft: [],
       authenticated: result.authenticated,
       credentialsConfigured: result.credentialsConfigured,
       authenticationStatus: result.authenticationStatus,
       unavailable: true,
-    })
+    }
+    console.error(
+      JSON.stringify({
+        service: "opensky",
+        event: "aircraft_api_upstream_unavailable",
+        responseBody,
+      }),
+    )
+    return NextResponse.json(responseBody)
   }
 
   const aircraft = result.states
@@ -67,11 +74,20 @@ export async function GET(request: Request) {
     .filter((aircraft): aircraft is AircraftMatch => aircraft !== null)
     .slice(0, 400)
 
-  return NextResponse.json({
+  const responseBody = {
     aircraft,
     authenticated: result.authenticated,
     credentialsConfigured: result.credentialsConfigured,
     authenticationStatus: result.authenticationStatus,
     updatedAt: new Date().toISOString(),
-  })
+  }
+  console.info(
+    JSON.stringify({
+      service: "opensky",
+      event: "aircraft_api_response",
+      aircraftParsed: aircraft.length,
+      responseBody,
+    }),
+  )
+  return NextResponse.json(responseBody)
 }

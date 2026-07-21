@@ -11,6 +11,39 @@ const STATES_URL = "https://opensky-network.org/api/states/all"
 
 let cachedToken: { value: string; expiresAt: number } | null = null
 
+function logOpenSky(event: string, details: Record<string, unknown>) {
+  console.info(JSON.stringify({ service: "opensky", event, ...details }))
+}
+
+function serializeError(error: unknown) {
+  if (!(error instanceof Error)) return { message: String(error) }
+
+  const cause = error.cause
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    cause:
+      cause instanceof Error
+        ? { name: cause.name, message: cause.message, stack: cause.stack }
+        : cause == null
+          ? undefined
+          : String(cause),
+  }
+}
+
+function redactOAuthBody(body: string) {
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>
+    for (const key of ["access_token", "refresh_token", "id_token", "client_secret"]) {
+      if (key in parsed) parsed[key] = "[REDACTED]"
+    }
+    return parsed
+  } catch {
+    return body.replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [REDACTED]")
+  }
+}
+
 type TokenResult = {
   token: string | null
   configured: boolean
@@ -26,12 +59,19 @@ async function getAccessToken(): Promise<TokenResult> {
 
   // Reuse a cached token until ~60s before expiry.
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
+    logOpenSky("oauth_token_cache_hit", { expiresAt: new Date(cachedToken.expiresAt).toISOString() })
     return { token: cachedToken.value, configured: true, status: "ok" }
   }
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 15_000)
+  let responseBody: string | undefined
   try {
+    logOpenSky("oauth_request", {
+      url: TOKEN_URL,
+      method: "POST",
+      credentialsConfigured: true,
+    })
     const res = await fetch(TOKEN_URL, {
       method: "POST",
       signal: controller.signal,
@@ -42,10 +82,16 @@ async function getAccessToken(): Promise<TokenResult> {
         client_secret: secret,
       }),
     })
+    responseBody = await res.text()
+    logOpenSky("oauth_response", {
+      url: TOKEN_URL,
+      status: res.status,
+      body: redactOAuthBody(responseBody),
+    })
     if (!res.ok) {
       return { token: null, configured: true, status: `http_${res.status}` }
     }
-    const data = (await res.json()) as { access_token?: string; expires_in?: number }
+    const data = JSON.parse(responseBody) as { access_token?: string; expires_in?: number }
     if (!data.access_token) {
       return { token: null, configured: true, status: "invalid_response" }
     }
@@ -55,6 +101,15 @@ async function getAccessToken(): Promise<TokenResult> {
     }
     return { token: cachedToken.value, configured: true, status: "ok" }
   } catch (error) {
+    console.error(
+      JSON.stringify({
+        service: "opensky",
+        event: "oauth_exception",
+        url: TOKEN_URL,
+        responseBody: responseBody ? redactOAuthBody(responseBody) : undefined,
+        error: serializeError(error),
+      }),
+    )
     return {
       token: null,
       configured: true,
@@ -88,13 +143,27 @@ export async function fetchOpenSkyStates(
 
   const ctrl = new AbortController()
   const t = setTimeout(() => ctrl.abort(), timeoutMs)
+  const requestUrl = `${STATES_URL}?${params.toString()}`
+  let responseBody: string | undefined
   try {
-    const res = await fetch(`${STATES_URL}?${params.toString()}`, {
+    logOpenSky("aircraft_request", {
+      url: requestUrl,
+      authorizationHeaderSent: Boolean(token),
+      authenticationStatus: tokenResult.status,
+    })
+    const res = await fetch(requestUrl, {
       signal: ctrl.signal,
       headers: {
         Accept: "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
+    })
+    responseBody = await res.text()
+    logOpenSky("aircraft_response", {
+      url: requestUrl,
+      status: res.status,
+      headers: Object.fromEntries(res.headers.entries()),
+      bodyLength: Buffer.byteLength(responseBody, "utf8"),
     })
     if (!res.ok) {
       return {
@@ -104,14 +173,25 @@ export async function fetchOpenSkyStates(
         authenticationStatus: tokenResult.status,
       }
     }
-    const data = await res.json()
+    const data = JSON.parse(responseBody) as { states?: unknown }
+    const states = Array.isArray(data.states) ? (data.states as unknown[][]) : null
+    logOpenSky("aircraft_parsed", { count: states?.length ?? 0 })
     return {
-      states: Array.isArray(data?.states) ? (data.states as unknown[][]) : null,
+      states,
       authenticated: Boolean(token),
       credentialsConfigured: tokenResult.configured,
       authenticationStatus: tokenResult.status,
     }
-  } catch {
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        service: "opensky",
+        event: "aircraft_exception",
+        url: requestUrl,
+        responseBody,
+        error: serializeError(error),
+      }),
+    )
     return {
       states: null,
       authenticated: Boolean(token),
