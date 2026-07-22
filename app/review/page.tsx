@@ -5,6 +5,7 @@ import type React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { BarChart3, ChevronLeft, ListChecks, LogOut, Plus, RadioTower, RefreshCw, Search, ShieldAlert, ShieldCheck, X } from "lucide-react"
+import { toast } from "sonner"
 
 import { Brand } from "@/components/brand"
 import { ReportDetail } from "@/components/review/report-detail"
@@ -18,7 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { clearSession, getSession, setSession } from "@/lib/store"
-import { listReports, setReportStatus } from "@/app/actions/reports"
+import { deleteReport, listReports, setReportStatus } from "@/app/actions/reports"
 import { getCurrentSession, signOut } from "@/app/actions/auth"
 import type { DroneReport, ReportStatus } from "@/lib/types"
 
@@ -125,6 +126,20 @@ export default function ReviewPage() {
     } catch (err) {
       console.error("[v0] failed to update status", err)
       await refresh()
+    }
+  }
+
+  async function handleDeleteReport(id: string) {
+    try {
+      const result = await deleteReport(id)
+      setReports((current) => current.filter((report) => report.id !== id))
+      setSelectedId(null)
+      if (result.cleanupWarning) toast.warning(result.cleanupWarning)
+      else toast.success("Report deleted.")
+    } catch (error) {
+      console.error("[icit] failed to delete report", error)
+      toast.error(error instanceof Error ? error.message : "Unable to delete this report.")
+      throw error
     }
   }
 
@@ -341,6 +356,7 @@ export default function ReviewPage() {
             <ReportDetail
               report={selected}
               onSetStatus={(status, note) => handleSetStatus(selected.id, status, note)}
+              onDelete={() => handleDeleteReport(selected.id)}
             />
           </div>
         </div>

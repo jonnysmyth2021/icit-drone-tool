@@ -353,3 +353,43 @@ export async function setReportStatus(
   }
   return { ok: true }
 }
+
+export async function deleteReport(
+  id: string,
+): Promise<{ ok: true; cleanupWarning?: string }> {
+  const { supabase, user } = await getAuthenticatedUser()
+  if (!(await isReviewer(supabase, user.id, user.app_metadata?.role))) {
+    throw new Error("Only reviewers can delete reports.")
+  }
+
+  // Capture object paths before the report deletion cascades to report_media.
+  const { data: mediaRows, error: mediaError } = await supabase
+    .from("report_media")
+    .select("file_path")
+    .eq("report_id", id)
+  if (mediaError) throw new Error(`Unable to inspect report evidence: ${mediaError.message}`)
+
+  const { data, error } = await supabase.from("reports").delete().eq("id", id).select("id").single()
+  if (error || !data) {
+    throw new Error(`Unable to delete report: ${error?.message ?? "Report not found"}`)
+  }
+
+  const paths = (mediaRows ?? [])
+    .map((row) => row.file_path)
+    .filter((path): path is string => typeof path === "string" && path.length > 0)
+  if (paths.length > 0) {
+    const { error: storageError } = await supabase.storage.from("report-media").remove(paths)
+    if (storageError) {
+      console.error("[icit] report deleted but evidence cleanup failed", {
+        reportId: id,
+        message: storageError.message,
+      })
+      return {
+        ok: true,
+        cleanupWarning: "The report was deleted, but some evidence files require manual cleanup.",
+      }
+    }
+  }
+
+  return { ok: true }
+}

@@ -157,11 +157,11 @@ export default function ReportPage() {
                     <CheckCircle2 className="size-8" />
                   </span>
                   <Dialog.Title className="mt-5 text-2xl font-semibold tracking-tight">
-                    Thank you for submitting your report
+                    Thank you!
                   </Dialog.Title>
                   <Dialog.Description className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground">
-                    Your sighting has been sent to the ICIT reviewer team. Keep this reference for
-                    any follow-up.
+                    Your report has been submitted successfully and sent to the ICIT reviewer
+                    team. Keep this reference for any follow-up.
                   </Dialog.Description>
                   {saved ? (
                     <div className="mt-5 rounded-xl border border-border bg-background/60 p-4">

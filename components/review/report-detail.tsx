@@ -1,9 +1,10 @@
 "use client"
 
+import { AlertDialog } from "@base-ui/react/alert-dialog"
 import { useState } from "react"
-import { Check, Film, Gavel, Lightbulb, MapPin, Mountain, Plane, ShieldAlert, X } from "lucide-react"
+import { Check, Film, Gavel, Lightbulb, Loader2, MapPin, Mountain, Plane, ShieldAlert, Trash2, X } from "lucide-react"
 import { VerdictBadge } from "@/components/report/verdict"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
@@ -22,15 +23,31 @@ const STATUS_LABEL: Record<ReportStatus, string> = {
 export function ReportDetail({
   report,
   onSetStatus,
+  onDelete,
 }: {
   report: DroneReport
   onSetStatus: (status: ReportStatus, note?: string) => void
+  onDelete: () => Promise<void>
 }) {
   const [note, setNote] = useState(report.reviewerNote ?? "")
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const decided = report.status === "confirmed" || report.status === "rejected"
 
   function decide(status: ReportStatus) {
     onSetStatus(status, note.trim() || undefined)
+  }
+
+  async function confirmDelete() {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await onDelete()
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete this report.")
+      setDeleting(false)
+    }
   }
 
   return (
@@ -213,6 +230,57 @@ export function ReportDetail({
           </p>
         )}
       </div>
+
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+        <SectionTitle icon={Trash2}>Delete report</SectionTitle>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Permanently removes this report, its intelligence record, and attached evidence.
+        </p>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="mt-3 w-full"
+          onClick={() => setDeleteOpen(true)}
+        >
+          <Trash2 className="size-4" />
+          Delete report
+        </Button>
+      </div>
+
+      <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialog.Portal>
+          <AlertDialog.Backdrop className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+          <AlertDialog.Viewport className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <AlertDialog.Popup className="w-full max-w-sm rounded-2xl border border-destructive/30 bg-card p-6 shadow-2xl outline-none transition duration-200 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
+              <span className="flex size-11 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+                <Trash2 className="size-5" />
+              </span>
+              <AlertDialog.Title className="mt-4 text-lg font-semibold">
+                Delete this report?
+              </AlertDialog.Title>
+              <AlertDialog.Description className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                Report <span className="font-mono text-foreground">{report.reference}</span> and its
+                evidence will be permanently removed. This cannot be undone.
+              </AlertDialog.Description>
+              {deleteError ? (
+                <p className="mt-3 text-sm text-destructive">{deleteError}</p>
+              ) : null}
+              <div className="mt-6 grid grid-cols-2 gap-2">
+                <AlertDialog.Close
+                  className={buttonVariants({ variant: "secondary" })}
+                  disabled={deleting}
+                >
+                  Cancel
+                </AlertDialog.Close>
+                <Button variant="destructive" onClick={() => void confirmDelete()} disabled={deleting}>
+                  {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                  {deleting ? "Deleting…" : "Delete"}
+                </Button>
+              </div>
+            </AlertDialog.Popup>
+          </AlertDialog.Viewport>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
 
     </div>
   )
