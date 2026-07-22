@@ -3,7 +3,7 @@
 import { AlertDialog } from "@base-ui/react/alert-dialog"
 import { Dialog } from "@base-ui/react/dialog"
 import { useState } from "react"
-import { Check, CloudSun, Film, Gavel, Lightbulb, Loader2, MapPin, Mountain, Plane, ShieldAlert, Trash2, Wind, X } from "lucide-react"
+import { BrainCircuit, Check, CloudSun, Eye, Film, Gavel, Lightbulb, Loader2, MapPin, Mountain, Plane, ShieldAlert, Trash2, Wind, X } from "lucide-react"
 import { VerdictBadge } from "@/components/report/verdict"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -13,6 +13,7 @@ import type { DroneReport, ReportStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { zonesContaining } from "@/lib/uk-frz"
 import { MiniMap } from "./mini-map"
+import { AircraftSnapshotMap } from "./aircraft-snapshot-map"
 
 const STATUS_LABEL: Record<ReportStatus, string> = {
   submitted: "Submitted",
@@ -25,16 +26,20 @@ export function ReportDetail({
   report,
   onSetStatus,
   onDelete,
+  onAnalyzePhotos,
 }: {
   report: DroneReport
   onSetStatus: (status: ReportStatus, note?: string) => void
   onDelete: () => Promise<void>
+  onAnalyzePhotos: () => Promise<void>
 }) {
   const [note, setNote] = useState(report.reviewerNote ?? "")
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [viewingImage, setViewingImage] = useState<{ src: string; alt: string } | null>(null)
+  const [analyzingPhotos, setAnalyzingPhotos] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
   const decided = report.status === "confirmed" || report.status === "rejected"
 
   function decide(status: ReportStatus) {
@@ -49,6 +54,18 @@ export function ReportDetail({
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "Unable to delete this report.")
       setDeleting(false)
+    }
+  }
+
+  async function analyzePhotos() {
+    setAnalyzingPhotos(true)
+    setAnalysisError(null)
+    try {
+      await onAnalyzePhotos()
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : "Unable to analyse report photos.")
+    } finally {
+      setAnalyzingPhotos(false)
     }
   }
 
@@ -83,6 +100,72 @@ export function ReportDetail({
             </span>
           </div>
           <p className="mt-2 text-sm leading-relaxed">{report.intelligence.summary}</p>
+        </div>
+      ) : null}
+
+      {report.intelligence?.visualEvidence ? (
+        <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <SectionTitle icon={Eye}>AI visual evidence</SectionTitle>
+            <span className="rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold capitalize text-primary">
+              {report.intelligence.visualEvidence.classification.replaceAll("_", " ")} · {Math.round(report.intelligence.visualEvidence.confidence * 100)}%
+            </span>
+          </div>
+          <p className="text-sm leading-relaxed">{report.intelligence.visualEvidence.summary}</p>
+          <div className="mt-3 space-y-2">
+            {report.intelligence.visualEvidence.images.map((image, index) => (
+              <div key={`${image.evidenceId}-${index}`} className="rounded-lg border border-border bg-background/60 p-3">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-medium">Image {index + 1}</span>
+                  <span className="capitalize text-muted-foreground">
+                    {image.classification.replaceAll("_", " ")} · {Math.round(image.confidence * 100)}% · {image.quality} quality
+                  </span>
+                </div>
+                {image.visibleFeatures.length > 0 ? (
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    Visible: {image.visibleFeatures.join("; ")}
+                  </p>
+                ) : null}
+                {image.limitations.length > 0 ? (
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Limitations: {image.limitations.join("; ")}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            Initial verdict: {report.intelligence.visualEvidence.initialVerdict.replaceAll("_", " ")} · analysed {new Date(report.intelligence.visualEvidence.generatedAt).toLocaleString()}
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3 w-full"
+            onClick={() => void analyzePhotos()}
+            disabled={analyzingPhotos}
+          >
+            {analyzingPhotos ? <Loader2 className="size-4 animate-spin" /> : <BrainCircuit className="size-4" />}
+            {analyzingPhotos ? "Reanalysing photos…" : "Reanalyse photos"}
+          </Button>
+          {analysisError ? <p className="mt-2 text-xs text-destructive">{analysisError}</p> : null}
+        </div>
+      ) : report.evidence.some((item) => item.preview && item.mimeType.startsWith("image/")) ? (
+        <div className="rounded-xl border border-border bg-card/70 p-4">
+          <SectionTitle icon={BrainCircuit}>AI visual evidence</SectionTitle>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            This report predates automatic photo analysis. Analyse its stored photos and reconcile the result with aircraft and location intelligence.
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3 w-full"
+            onClick={() => void analyzePhotos()}
+            disabled={analyzingPhotos}
+          >
+            {analyzingPhotos ? <Loader2 className="size-4 animate-spin" /> : <BrainCircuit className="size-4" />}
+            {analyzingPhotos ? "Analysing photos…" : "Analyse stored photos"}
+          </Button>
+          {analysisError ? <p className="mt-2 text-xs text-destructive">{analysisError}</p> : null}
         </div>
       ) : null}
 
@@ -304,6 +387,18 @@ export function ReportDetail({
       {report.intelligence && report.intelligence.aircraftNearby.length > 0 ? (
         <div>
           <SectionTitle icon={Plane}>Aircraft at time of sighting</SectionTitle>
+          <div className="mb-3 overflow-hidden rounded-xl border border-border">
+            <AircraftSnapshotMap
+              location={report.location}
+              aircraft={report.intelligence.aircraftNearby}
+            />
+            <div className="flex items-center justify-between gap-3 border-t border-border bg-card/90 px-3 py-2 text-[11px] text-muted-foreground">
+              <span>Blue dot: sighting location · planes coloured by altitude</span>
+              <span className="shrink-0 font-mono">
+                {new Date(report.intelligence.generatedAt).toLocaleString()}
+              </span>
+            </div>
+          </div>
           <ul className="flex flex-col divide-y divide-border rounded-lg border border-border bg-card/70 px-3">
             {report.intelligence.aircraftNearby.map((a) => (
               <li key={a.icao24} className="flex items-center justify-between py-2 text-sm">

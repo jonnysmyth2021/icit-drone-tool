@@ -52,6 +52,7 @@ Import these with **Contains secret values** enabled:
 | `OPENWEATHER_API_KEY` | No | Enables the current weather and wind snapshot stored with generated reports. |
 | `SUPABASE_SERVICE_ROLE_KEY` | No | Correctly named server-only Supabase administrative key. |
 | `OPENAI_INTELLIGENCE_MODEL` | No | Overrides the default `gpt-5.4-mini`. |
+| `OPENAI_VISUAL_INTELLIGENCE_MODEL` | No | Overrides the multimodal model used for post-upload photo analysis; otherwise uses `OPENAI_INTELLIGENCE_MODEL`. |
 | `DATABASE_URL` | No | Reserved for the currently unused Drizzle/Postgres module. |
 
 Never add secrets to `netlify.toml` or commit a populated `.env` file. Copy-ready

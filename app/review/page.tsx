@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { clearSession, getSession, setSession } from "@/lib/store"
-import { deleteReport, listReports, setReportStatus } from "@/app/actions/reports"
+import { analyzeReportPhotos, deleteReport, listReports, setReportStatus } from "@/app/actions/reports"
 import { getCurrentSession, signOut } from "@/app/actions/auth"
 import type { DroneReport, ReportStatus } from "@/lib/types"
 
@@ -72,7 +72,6 @@ export default function ReviewPage() {
     return () => {
       active = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
 
   async function refresh() {
@@ -140,6 +139,22 @@ export default function ReviewPage() {
     } catch (error) {
       console.error("[icit] failed to delete report", error)
       toast.error(error instanceof Error ? error.message : "Unable to delete this report.")
+      throw error
+    }
+  }
+
+  async function handleAnalyzeReport(id: string) {
+    try {
+      const result = await analyzeReportPhotos(id)
+      setReports((current) =>
+        current.map((report) =>
+          report.id === id ? { ...report, intelligence: result.intelligence } : report,
+        ),
+      )
+      toast.success("Photo analysis complete. The intelligence verdict has been updated.")
+    } catch (error) {
+      console.error("[icit] visual evidence analysis failed", error)
+      toast.error(error instanceof Error ? error.message : "Unable to analyse report photos.")
       throw error
     }
   }
@@ -359,6 +374,7 @@ export default function ReviewPage() {
               report={selected}
               onSetStatus={(status, note) => handleSetStatus(selected.id, status, note)}
               onDelete={() => handleDeleteReport(selected.id)}
+              onAnalyzePhotos={() => handleAnalyzeReport(selected.id)}
             />
           </div>
         </div>

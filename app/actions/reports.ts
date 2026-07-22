@@ -5,6 +5,7 @@ import { AIRSPACE_RISK_ENGINE_VERSION } from "@/lib/airspace/risk-engine"
 import { airspaceService } from "@/lib/airspace/service"
 import type { AirspaceRiskAssessment } from "@/lib/airspace"
 import type { DroneReport, EvidenceItem, ReportStatus } from "@/lib/types"
+import { analyzeVisualEvidence, type VisualImageInput } from "@/lib/intelligence/visual-analysis"
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>
 
@@ -78,7 +79,8 @@ async function saveMedia(
   userId: string,
   reportId: string,
   evidence: EvidenceItem[],
-) {
+): Promise<MediaRow[]> {
+  const stored: MediaRow[] = []
   for (const item of evidence) {
     const upload = dataUrlToUpload(item)
     if (!upload) continue
@@ -108,7 +110,99 @@ async function saveMedia(
       },
     })
     if (mediaError) throw new Error(`Unable to register ${item.fileName}: ${mediaError.message}`)
+    stored.push({
+      id: item.id,
+      report_id: reportId,
+      file_path: filePath,
+      file_type: item.kind,
+      mime_type: upload.mimeType,
+      file_size: upload.bytes.byteLength,
+      created_at: item.capturedAt,
+      metadata: {
+        ...item.metadata,
+        evidenceId: item.id,
+        filename: item.fileName,
+        originalMimeType: item.mimeType,
+        originalSizeBytes: item.sizeBytes,
+        source: item.source,
+        capturedAt: item.capturedAt,
+      },
+    })
   }
+  return stored
+}
+
+async function downloadVisualEvidence(
+  supabase: SupabaseClient,
+  mediaRows: MediaRow[],
+): Promise<VisualImageInput[]> {
+  const candidates = mediaRows.filter((media) => media.mime_type.startsWith("image/")).slice(0, 4)
+  const images: VisualImageInput[] = []
+  for (const media of candidates) {
+    const { data, error } = await supabase.storage.from("report-media").download(media.file_path)
+    if (error || !data) {
+      throw new Error(`Unable to read uploaded evidence: ${error?.message ?? media.file_path}`)
+    }
+    const metadata = media.metadata ?? {}
+    images.push({
+      evidenceId: String(metadata.evidenceId ?? media.id),
+      fileName: String(metadata.filename ?? media.file_path.split("/").at(-1) ?? "Evidence"),
+      mimeType: media.mime_type,
+      bytes: new Uint8Array(await data.arrayBuffer()),
+    })
+  }
+  return images
+}
+
+function evidenceToVisualInputs(evidence: EvidenceItem[]): VisualImageInput[] {
+  const images: VisualImageInput[] = []
+  for (const item of evidence) {
+    if (images.length >= 4) break
+    const upload = dataUrlToUpload(item)
+    if (!upload || !upload.mimeType.startsWith("image/")) continue
+    images.push({
+      evidenceId: item.id,
+      fileName: item.fileName,
+      mimeType: upload.mimeType,
+      bytes: upload.bytes,
+    })
+  }
+  return images
+}
+
+function reportContext(report: DroneReport) {
+  return {
+    reference: report.reference,
+    observedAt: report.createdAt,
+    droneTypeReported: report.droneType,
+    altitudeReported: report.altitude,
+    lightsVisible: report.lightsVisible,
+    lightColors: report.lightColors,
+    location: report.location,
+  }
+}
+
+async function addVisualAnalysis(
+  supabase: SupabaseClient,
+  mediaRows: MediaRow[],
+  intelligence: NonNullable<DroneReport["intelligence"]>,
+  context: Record<string, unknown>,
+) {
+  const images = await downloadVisualEvidence(supabase, mediaRows)
+  if (images.length === 0) return intelligence
+  return (await analyzeVisualEvidence({ images, initialAssessment: intelligence, reportContext: context }))
+    .assessment
+}
+
+async function addUploadedVisualAnalysis(
+  evidence: EvidenceItem[],
+  intelligence: NonNullable<DroneReport["intelligence"]>,
+  context: Record<string, unknown>,
+) {
+  const images = evidenceToVisualInputs(evidence)
+  if (images.length === 0) return intelligence
+  return (await analyzeVisualEvidence({ images, initialAssessment: intelligence, reportContext: context }))
+    .assessment
 }
 
 function approximateAltitudeMetres(altitude: DroneReport["altitude"]) {
@@ -120,7 +214,9 @@ function approximateAltitudeMetres(altitude: DroneReport["altitude"]) {
   return null
 }
 
-export async function createReport(report: DroneReport): Promise<{ ok: true }> {
+export async function createReport(
+  report: DroneReport,
+): Promise<{ ok: true; intelligence: DroneReport["intelligence"] }> {
   const { supabase, user } = await getAuthenticatedUser()
   const location = report.location
   const intelligence = report.intelligence
@@ -186,11 +282,37 @@ export async function createReport(report: DroneReport): Promise<{ ok: true }> {
 
   if (error) throw new Error(`Unable to save report: ${error.message}`)
 
-  await saveMedia(supabase, user.id, report.id, report.evidence)
+  const storedMedia = await saveMedia(supabase, user.id, report.id, report.evidence)
+  let finalIntelligence = intelligence
+  if (intelligence && storedMedia.some((media) => media.mime_type.startsWith("image/"))) {
+    try {
+      // Run only after saveMedia has completed. Reuse those exact uploaded bytes
+      // rather than adding a second private-storage network round trip.
+      finalIntelligence = await addUploadedVisualAnalysis(
+        report.evidence,
+        intelligence,
+        reportContext(report),
+      )
+    } catch (visualError) {
+      console.error("[icit] post-upload visual analysis failed", {
+        reportId: report.id,
+        name: visualError instanceof Error ? visualError.name : undefined,
+        message: visualError instanceof Error ? visualError.message : String(visualError),
+        stack: visualError instanceof Error ? visualError.stack : undefined,
+      })
+      finalIntelligence = {
+        ...intelligence,
+        dataSources: [
+          ...intelligence.dataSources.filter((source) => source.name !== "OpenAI visual evidence analysis"),
+          { name: "OpenAI visual evidence analysis", status: "error" },
+        ],
+      }
+    }
+  }
 
-  if (intelligence || airspaceAssessment) {
-    const combinedAssessment = intelligence
-      ? { ...intelligence, airspace: airspaceAssessment }
+  if (finalIntelligence || airspaceAssessment) {
+    const combinedAssessment = finalIntelligence
+      ? { ...finalIntelligence, airspace: airspaceAssessment }
       : {
           verdict: "inconclusive",
           confidence: 0,
@@ -203,26 +325,28 @@ export async function createReport(report: DroneReport): Promise<{ ok: true }> {
         }
     const { error: enrichmentError } = await supabase.from("report_enrichment").insert({
       report_id: report.id,
-      source: "icit-intelligence-v1",
-      classification: intelligence?.verdict ?? "inconclusive",
-      confidence: intelligence?.confidence ?? 0,
+      source: finalIntelligence?.visualEvidence
+        ? "icit-intelligence-v2-visual"
+        : "icit-intelligence-v1",
+      classification: finalIntelligence?.verdict ?? "inconclusive",
+      confidence: finalIntelligence?.confidence ?? 0,
       priority:
         airspaceAssessment?.riskLevel === "CRITICAL" || airspaceAssessment?.riskLevel === "HIGH"
           ? "high"
-          : (intelligence?.confidence ?? 0) >= 0.75
+          : (finalIntelligence?.confidence ?? 0) >= 0.75
             ? "high"
             : "medium",
       recommended_action:
-        airspaceAssessment?.recommendedActions[0] ?? (intelligence?.verdict === "likely_drone"
+        airspaceAssessment?.recommendedActions[0] ?? (finalIntelligence?.verdict === "likely_drone"
           ? "Prioritise reviewer validation"
           : "Review supporting evidence"),
       airspace: {
-        nearby_flights: intelligence?.aircraftNearby ?? [],
+        nearby_flights: finalIntelligence?.aircraftNearby ?? [],
         assessment: airspaceAssessment,
       },
-      astronomy: { matches: intelligence?.astronomyMatches ?? [] },
+      astronomy: { matches: finalIntelligence?.astronomyMatches ?? [] },
       assessment: combinedAssessment,
-      enrichment_version: "1.0",
+      enrichment_version: finalIntelligence?.visualEvidence ? "2.0" : "1.0",
     })
     if (enrichmentError) {
       throw new Error(`Report saved, but intelligence enrichment failed: ${enrichmentError.message}`)
@@ -251,7 +375,7 @@ export async function createReport(report: DroneReport): Promise<{ ok: true }> {
     }
   }
 
-  return { ok: true }
+  return { ok: true, intelligence: finalIntelligence }
 }
 
 function toAppStatus(status: string | null): ReportStatus {
@@ -393,6 +517,108 @@ export async function listReports(): Promise<DroneReport[]> {
       status: toAppStatus(row.status),
     }
   })
+}
+
+export async function analyzeReportPhotos(
+  id: string,
+): Promise<{ ok: true; intelligence: NonNullable<DroneReport["intelligence"]> }> {
+  const { supabase, user } = await getAuthenticatedUser()
+  if (!(await isReviewer(supabase, user.id, user.app_metadata?.role))) {
+    throw new Error("Only reviewers can run visual evidence analysis.")
+  }
+
+  const [{ data: reportData, error: reportError }, { data: enrichmentData, error: enrichmentError }, { data: mediaData, error: mediaError }] =
+    await Promise.all([
+      supabase
+        .from("reports")
+        .select(
+          "id, created_at, user_id, remote_id, type, height, has_lights, lights_visible, light_colors, latitude, longitude, location, status, observation, map_context, intelligence_summary",
+        )
+        .eq("id", id)
+        .single(),
+      supabase
+        .from("report_enrichment")
+        .select("report_id, classification, confidence, source, created_at, airspace, astronomy, assessment")
+        .eq("report_id", id)
+        .single(),
+      supabase.from("report_media").select("*").eq("report_id", id),
+    ])
+
+  if (reportError || !reportData) throw new Error(`Unable to load report: ${reportError?.message ?? "Not found"}`)
+  if (enrichmentError || !enrichmentData) {
+    throw new Error(`Unable to load report intelligence: ${enrichmentError?.message ?? "Not found"}`)
+  }
+  if (mediaError) throw new Error(`Unable to load report evidence: ${mediaError.message}`)
+
+  const row = reportData as ReportRow
+  const current = toIntelligence(enrichmentData as EnrichmentRow)
+  if (!current) throw new Error("This report has no intelligence assessment to revise.")
+  const mediaRows = (mediaData ?? []) as MediaRow[]
+  if (!mediaRows.some((media) => media.mime_type.startsWith("image/"))) {
+    throw new Error("This report has no supported photo evidence to analyse.")
+  }
+
+  const location = row.location ?? {
+    lat: row.latitude ?? 51.5072,
+    lng: row.longitude ?? -0.1276,
+    accuracy: null,
+    bearing: Number(row.map_context?.sightingDirection ?? 0),
+    deviceHeading: Number(row.map_context?.deviceHeading ?? 0),
+  }
+  const reference =
+    typeof row.remote_id === "string"
+      ? row.remote_id
+      : row.remote_id?.reference ?? `ICIT-${row.id.slice(0, 8).toUpperCase()}`
+  const context = {
+    reference,
+    observedAt: row.created_at,
+    droneTypeReported: row.type ?? "Unknown",
+    altitudeReported: row.height ?? "Unknown",
+    lightsVisible: row.observation?.lightsVisible ?? row.lights_visible ?? row.has_lights,
+    lightColors: row.light_colors ?? [],
+    location,
+  }
+  const revised = await addVisualAnalysis(supabase, mediaRows, current, context)
+  if (!revised.visualEvidence) throw new Error("Visual analysis returned no result.")
+
+  const existingSummary = row.intelligence_summary ?? {}
+  const [{ error: updateEnrichmentError }, { error: updateReportError }] = await Promise.all([
+    supabase
+      .from("report_enrichment")
+      .update({
+        source: "icit-intelligence-v2-visual",
+        classification: revised.verdict,
+        confidence: revised.confidence,
+        priority: revised.verdict === "likely_drone" || revised.confidence >= 0.75 ? "high" : "medium",
+        recommended_action: revised.recommendedAction ?? "Review visual evidence",
+        assessment: revised,
+        enrichment_version: "2.0",
+      })
+      .eq("report_id", id),
+    supabase
+      .from("reports")
+      .update({
+        intelligence_summary: {
+          ...existingSummary,
+          classification: revised.verdict,
+          confidence: revised.confidence,
+          summary: revised.summary,
+          generatedAt: revised.generatedAt,
+          dataSources: revised.dataSources,
+          visualEvidence: revised.visualEvidence,
+        },
+        enriched_at: revised.generatedAt,
+      })
+      .eq("id", id),
+  ])
+  if (updateEnrichmentError) {
+    throw new Error(`Unable to save visual assessment: ${updateEnrichmentError.message}`)
+  }
+  if (updateReportError) {
+    throw new Error(`Visual assessment saved, but the report summary update failed: ${updateReportError.message}`)
+  }
+
+  return { ok: true, intelligence: revised }
 }
 
 function toDatabaseStatus(status: ReportStatus) {

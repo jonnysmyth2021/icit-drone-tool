@@ -64,6 +64,26 @@ export interface WeatherObservation {
   provider: "OpenWeather"
 }
 
+export type VisualClassification = "drone" | "crewed_aircraft" | "bird" | "indeterminate"
+
+export interface VisualEvidenceAnalysis {
+  classification: VisualClassification
+  confidence: number
+  summary: string
+  analyzedImageCount: number
+  images: {
+    evidenceId: string
+    classification: VisualClassification
+    confidence: number
+    quality: "good" | "limited" | "poor"
+    visibleFeatures: string[]
+    limitations: string[]
+  }[]
+  initialVerdict: Verdict
+  generatedAt: string
+  model: string
+}
+
 export type Verdict = "likely_drone" | "possible_aircraft" | "possible_astronomical" | "inconclusive"
 
 export interface IntelligenceAssessment {
@@ -82,6 +102,8 @@ export interface IntelligenceAssessment {
   astronomyMatches: AstronomyMatch[]
   /** Weather captured when the intelligence report was generated. */
   weather?: WeatherObservation | null
+  /** Post-upload pixel analysis, kept separately from the initial assessment for auditability. */
+  visualEvidence?: VisualEvidenceAnalysis | null
   airspace?: AirspaceRiskAssessment | null
   generatedAt: string
   dataSources: { name: string; status: "ok" | "fallback" | "error" }[]

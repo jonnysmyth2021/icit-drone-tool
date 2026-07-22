@@ -114,7 +114,8 @@ export default function ReportPage() {
       status: "submitted",
     }
     try {
-      await createReport(report)
+      const result = await createReport(report)
+      report.intelligence = result.intelligence
     } catch (err) {
       console.error("[icit] createReport failed", err)
       toast.error(err instanceof Error ? err.message : "Unable to submit this report.")
