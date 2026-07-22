@@ -1,4 +1,5 @@
 import type { Aircraft } from "@/lib/aircraft"
+import type { AirspaceRiskAssessment } from "@/lib/airspace"
 
 export type DroneType = "Multi-Rotor" | "Fixed Wing" | "Unknown"
 
@@ -51,6 +52,18 @@ export interface AstronomyMatch {
   distanceKm?: number
 }
 
+export interface WeatherObservation {
+  temperatureC: number | null
+  conditions: string | null
+  windSpeedMps: number
+  windSpeedMph: number
+  windDirectionDegrees: number | null
+  windGustMps: number | null
+  windGustMph: number | null
+  observedAt: string
+  provider: "OpenWeather"
+}
+
 export type Verdict = "likely_drone" | "possible_aircraft" | "possible_astronomical" | "inconclusive"
 
 export interface IntelligenceAssessment {
@@ -67,6 +80,9 @@ export interface IntelligenceAssessment {
   recommendedAction?: string
   aircraftNearby: AircraftMatch[]
   astronomyMatches: AstronomyMatch[]
+  /** Weather captured when the intelligence report was generated. */
+  weather?: WeatherObservation | null
+  airspace?: AirspaceRiskAssessment | null
   generatedAt: string
   dataSources: { name: string; status: "ok" | "fallback" | "error" }[]
 }

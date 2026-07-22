@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { AlertTriangle, Check, Loader2, Plane, Radar, RotateCcw, Satellite, Send, Sparkles } from "lucide-react"
+import { AlertTriangle, Check, CloudSun, Loader2, Plane, Radar, RotateCcw, Satellite, Send, Sparkles, Wind } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { IntelligenceAssessment, ReportLocation } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -198,6 +198,47 @@ function AssessmentResult({ assessment }: { assessment: IntelligenceAssessment }
               </div>
             ))}
           </div>
+        </div>
+      ) : null}
+
+      {assessment.weather ? (
+        <div className="rounded-xl border border-border bg-card/70 p-4">
+          <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+            <CloudSun className="size-4 text-primary" />
+            Weather at report location
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg bg-secondary/60 p-3">
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Wind className="size-3.5" /> Wind
+              </p>
+              <p className="mt-1 font-mono text-lg font-semibold">
+                {assessment.weather.windSpeedMph} mph
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {assessment.weather.windSpeedMps.toFixed(1)} m/s
+                {assessment.weather.windDirectionDegrees != null
+                  ? ` · ${Math.round(assessment.weather.windDirectionDegrees)}°`
+                  : ""}
+              </p>
+            </div>
+            <div className="rounded-lg bg-secondary/60 p-3">
+              <p className="text-xs text-muted-foreground">Conditions</p>
+              <p className="mt-1 text-sm font-semibold capitalize">
+                {assessment.weather.conditions ?? "Current conditions"}
+              </p>
+              {assessment.weather.temperatureC != null ? (
+                <p className="text-xs text-muted-foreground">
+                  {Math.round(assessment.weather.temperatureC)}°C
+                </p>
+              ) : null}
+            </div>
+          </div>
+          {assessment.weather.windGustMph != null ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Gusting up to {assessment.weather.windGustMph} mph
+            </p>
+          ) : null}
         </div>
       ) : null}
 

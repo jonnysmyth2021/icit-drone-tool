@@ -4,19 +4,32 @@ import "leaflet/dist/leaflet.css"
 
 import type * as L from "leaflet"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Compass, Crosshair, Layers, Loader2, MapPin, MapPinned } from "lucide-react"
+import { Check, Compass, Crosshair, Layers, Loader2, MapPin } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ReportLocation } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { UK_FLIGHT_RESTRICTION_ZONES } from "@/lib/uk-frz"
 import { buildAirspaceLayer, buildNsaProhibitedLayer, loadUkAirspace } from "@/lib/uk-airspace"
 import { buildSensitiveSitesLayer, loadUkSensitiveSites } from "@/lib/uk-sensitive-sites"
+import { buildCanonicalAirspaceLayer, loadAirspaceBounds } from "@/lib/airspace/map"
 import { StepShell } from "./step-shell"
 
 const ESRI_IMAGERY =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 
 const FRZ_COLOR = "#ef4444"
+
+const AIRSPACE_LAYER_OPTIONS = [
+  { id: "frz", label: "FRZ", categories: ["frz"], color: "#ef4444" },
+  { id: "notam", label: "NOTAM", categories: ["notam", "temporary_aviation"], color: "#f97316" },
+  { id: "military", label: "Military", categories: ["military"], color: "#16a34a" },
+  { id: "police", label: "Police", categories: ["police", "police_air_operation"], color: "#2563eb" },
+  { id: "prison", label: "Prison", categories: ["prison"], color: "#a855f7" },
+  { id: "critical", label: "Critical", categories: ["critical_infrastructure"], color: "#dc2626" },
+  { id: "airports", label: "Airports", categories: ["airport", "aerodrome"], color: "#06b6d4" },
+  { id: "utilities", label: "Utilities", categories: ["power_station", "substation", "water_treatment", "reservoir", "oil_gas", "telecom"], color: "#eab308" },
+  { id: "environmental", label: "Environmental", categories: ["advisory"], color: "#22c55e" },
+] as const
 
 const MARKER_HTML = `
   <div class="user-location-marker" style="--heading:0deg">
@@ -49,15 +62,21 @@ export function StepLocation({
   const nsaRef = useRef<L.GeoJSON | null>(null)
   const showNsaRef = useRef(false)
   const sitesRef = useRef<L.GeoJSON | null>(null)
+  const intelligenceLayerRef = useRef<L.GeoJSON | null>(null)
   const showSitesRef = useRef(false)
   const [locating, setLocating] = useState(false)
   const [bearing, setBearing] = useState<number>(value?.bearing ?? 0)
   const [deviceHeading, setDeviceHeading] = useState<number | null>(value?.deviceHeading ?? null)
   const [compassOn, setCompassOn] = useState(false)
-  const [showFrz, setShowFrz] = useState(false)
+  const [showFrz, setShowFrz] = useState(true)
   const [showUas, setShowUas] = useState(false)
   const [showNsa, setShowNsa] = useState(false)
   const [showSites, setShowSites] = useState(false)
+  const [mapRevision, setMapRevision] = useState(0)
+  const [airspaceUnavailable, setAirspaceUnavailable] = useState(false)
+  const [enabledAirspaceLayers, setEnabledAirspaceLayers] = useState<Set<string>>(
+    () => new Set(["frz", "notam"]),
+  )
   const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy: number | null }>({
     lat: value?.lat ?? 51.5072,
     lng: value?.lng ?? -0.1276,
@@ -96,6 +115,7 @@ export function StepLocation({
         maxZoom: 19,
       }).addTo(map)
       L.control.zoom({ position: "bottomright" }).addTo(map)
+      map.on("moveend", () => setMapRevision((revision) => revision + 1))
 
       // FRZ layer (off by default, toggled by button).
       const frz = L.layerGroup()
@@ -159,6 +179,7 @@ export function StepLocation({
       uasRef.current = null
       nsaRef.current = null
       sitesRef.current = null
+      intelligenceLayerRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -202,6 +223,44 @@ export function StepLocation({
     if (showSites) sites.addTo(map)
     else map.removeLayer(sites)
   }, [showSites])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const categories = AIRSPACE_LAYER_OPTIONS
+          .filter((layer) => enabledAirspaceLayers.has(layer.id))
+          .flatMap((layer) => [...layer.categories])
+        intelligenceLayerRef.current?.removeFrom(map)
+        intelligenceLayerRef.current = null
+        if (categories.length === 0) return
+        const bounds = map.getBounds()
+        try {
+          const [L, collection] = await Promise.all([
+            import("leaflet").then((module) => module.default),
+            loadAirspaceBounds({
+              minLon: bounds.getWest(), minLat: bounds.getSouth(),
+              maxLon: bounds.getEast(), maxLat: bounds.getNorth(),
+            }, categories),
+          ])
+          if (cancelled || !mapRef.current) return
+          intelligenceLayerRef.current = buildCanonicalAirspaceLayer(L, collection).addTo(map)
+          setAirspaceUnavailable(false)
+        } catch (error) {
+          if (!cancelled) {
+            console.error("[icit] reporter airspace layer unavailable", error)
+            setAirspaceUnavailable(true)
+          }
+        }
+      })()
+    }, 250)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [enabledAirspaceLayers, mapRevision])
 
   // Keep marker position synced and propagate changes up.
   useEffect(() => {
@@ -295,40 +354,44 @@ export function StepLocation({
         </Button>
       </div>
 
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <Button
-          variant={showFrz ? "default" : "secondary"}
-          size="sm"
-          onClick={() => setShowFrz((s) => !s)}
-        >
+      <details className="mt-2 rounded-lg border border-border bg-card/70">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium">
           <Layers className="size-4" />
-          FRZ
-        </Button>
-        <Button
-          variant={showUas ? "default" : "secondary"}
-          size="sm"
-          onClick={() => setShowUas((s) => !s)}
-        >
-          <Layers className="size-4" />
-          UAS
-        </Button>
-        <Button
-          variant={showNsa ? "default" : "secondary"}
-          size="sm"
-          onClick={() => setShowNsa((s) => !s)}
-        >
-          <Layers className="size-4" />
-          NSA
-        </Button>
-        <Button
-          variant={showSites ? "default" : "secondary"}
-          size="sm"
-          onClick={() => setShowSites((s) => !s)}
-        >
-          <MapPinned className="size-4" />
-          Sites
-        </Button>
-      </div>
+          Airspace layers
+          <span className="ml-auto font-mono text-xs text-muted-foreground">{enabledAirspaceLayers.size} active</span>
+        </summary>
+        <div className="grid grid-cols-2 gap-2 border-t border-border p-3">
+          {AIRSPACE_LAYER_OPTIONS.map((layer) => {
+            const enabled = enabledAirspaceLayers.has(layer.id)
+            return (
+              <button
+                key={layer.id}
+                type="button"
+                onClick={() => {
+                  setEnabledAirspaceLayers((current) => {
+                    const next = new Set(current)
+                    if (next.has(layer.id)) next.delete(layer.id)
+                    else next.add(layer.id)
+                    return next
+                  })
+                  if (layer.id === "frz") setShowFrz((current) => !current)
+                }}
+                className={cn(
+                  "flex items-center gap-2 rounded-md border px-2.5 py-2 text-xs font-medium",
+                  enabled ? "border-primary/40 bg-primary/15" : "border-border text-muted-foreground",
+                )}
+              >
+                <span className="size-2.5 rounded-sm" style={{ backgroundColor: layer.color }} />
+                <span className="flex-1 text-left">{layer.label}</span>
+                <Check className={cn("size-3.5", enabled ? "opacity-100" : "opacity-0")} />
+              </button>
+            )
+          })}
+          {airspaceUnavailable ? (
+            <p className="col-span-2 text-xs text-destructive">Live restriction intelligence unavailable.</p>
+          ) : null}
+        </div>
+      </details>
 
       <div className="mt-4 rounded-lg border border-border bg-card/70 p-4">
         <div className="flex items-center justify-between">

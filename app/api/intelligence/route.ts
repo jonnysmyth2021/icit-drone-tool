@@ -4,6 +4,7 @@ import type {
   AircraftMatch,
   AstronomyMatch,
   IntelligenceAssessment,
+  WeatherObservation,
 } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
@@ -73,6 +74,45 @@ async function getIss(lat: number, lng: number): Promise<AstronomyMatch[]> {
     })
   }
   return matches
+}
+
+type OpenWeatherResponse = {
+  dt?: number
+  main?: { temp?: number }
+  weather?: { description?: string }[]
+  wind?: { speed?: number; deg?: number; gust?: number }
+}
+
+async function getWeather(lat: number, lng: number): Promise<WeatherObservation | null> {
+  const apiKey = process.env.OPENWEATHER_API_KEY
+  if (!apiKey) return null
+
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lon: String(lng),
+    units: "metric",
+    appid: apiKey,
+  })
+  const data = (await fetchWithTimeout(
+    `https://api.openweathermap.org/data/2.5/weather?${params.toString()}`,
+  )) as OpenWeatherResponse | null
+
+  if (!data || typeof data.wind?.speed !== "number") return null
+
+  const metresPerSecond = data.wind.speed
+  const gustMetresPerSecond = typeof data.wind.gust === "number" ? data.wind.gust : null
+  return {
+    temperatureC: typeof data.main?.temp === "number" ? data.main.temp : null,
+    conditions: data.weather?.[0]?.description ?? null,
+    windSpeedMps: metresPerSecond,
+    windSpeedMph: Number((metresPerSecond * 2.23694).toFixed(1)),
+    windDirectionDegrees: typeof data.wind.deg === "number" ? data.wind.deg : null,
+    windGustMps: gustMetresPerSecond,
+    windGustMph:
+      gustMetresPerSecond === null ? null : Number((gustMetresPerSecond * 2.23694).toFixed(1)),
+    observedAt: new Date((data.dt ?? Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+    provider: "OpenWeather",
+  }
 }
 
 function getCelestial(lat: number, lng: number): AstronomyMatch[] {
@@ -224,6 +264,9 @@ export async function POST(request: Request) {
   const celestial = getCelestial(lat, lng)
   sources.push({ name: "Night-sky / celestial check", status: "ok" })
 
+  const weather = await getWeather(lat, lng)
+  sources.push({ name: "OpenWeather current conditions", status: weather ? "ok" : "error" })
+
   const aircraftSafe = aircraft ?? []
   const astronomy = [...iss, ...celestial]
   let ai: AiAssessment
@@ -236,6 +279,7 @@ export async function POST(request: Request) {
       },
       aircraft: aircraftSafe,
       astronomy,
+      weather,
       sourceHealth: sources,
     })
     sources.push({ name: "OpenAI grounded classifier", status: "ok" })
@@ -256,6 +300,7 @@ export async function POST(request: Request) {
     confidence: Number(ai.confidence.toFixed(2)),
     aircraftNearby: aircraftSafe,
     astronomyMatches: astronomy,
+    weather,
     generatedAt: new Date().toISOString(),
     dataSources: sources,
   }

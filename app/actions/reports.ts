@@ -1,6 +1,9 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { AIRSPACE_RISK_ENGINE_VERSION } from "@/lib/airspace/risk-engine"
+import { airspaceService } from "@/lib/airspace/service"
+import type { AirspaceRiskAssessment } from "@/lib/airspace"
 import type { DroneReport, EvidenceItem, ReportStatus } from "@/lib/types"
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>
@@ -108,10 +111,35 @@ async function saveMedia(
   }
 }
 
+function approximateAltitudeMetres(altitude: DroneReport["altitude"]) {
+  if (altitude === "Below Treeline") return 10
+  if (altitude === "Treeline Height") return 20
+  if (altitude === "Above Treeline") return 40
+  if (altitude === "Above Buildings") return 100
+  if (altitude === "High Altitude") return 250
+  return null
+}
+
 export async function createReport(report: DroneReport): Promise<{ ok: true }> {
   const { supabase, user } = await getAuthenticatedUser()
   const location = report.location
   const intelligence = report.intelligence
+  let airspaceAssessment: AirspaceRiskAssessment | null = null
+
+  try {
+    airspaceAssessment = await airspaceService.assessRisk({
+      lat: location.lat,
+      lon: location.lng,
+      altitudeMetres: approximateAltitudeMetres(report.altitude),
+      timestamp: report.createdAt,
+      radiusMetres: 5_000,
+    })
+  } catch (airspaceError) {
+    console.error("[icit] airspace assessment unavailable during report submission", {
+      reportId: report.id,
+      message: airspaceError instanceof Error ? airspaceError.message : String(airspaceError),
+    })
+  }
 
   const { error } = await supabase.from("reports").insert({
     id: report.id,
@@ -138,7 +166,11 @@ export async function createReport(report: DroneReport): Promise<{ ok: true }> {
       reporterPosition: { lat: location.lat, lng: location.lng, accuracy: location.accuracy },
       sightingDirection: location.bearing,
       deviceHeading: location.deviceHeading,
+      airspaceAssessment,
     },
+    risk_score: airspaceAssessment?.score ?? null,
+    risk_level: airspaceAssessment?.riskLevel ?? null,
+    risk: airspaceAssessment,
     intelligence_summary: intelligence
       ? {
           classification: intelligence.verdict,
@@ -146,32 +178,76 @@ export async function createReport(report: DroneReport): Promise<{ ok: true }> {
           summary: intelligence.summary,
           generatedAt: intelligence.generatedAt,
           dataSources: intelligence.dataSources,
+          weather: intelligence.weather ?? null,
+          airspace: airspaceAssessment,
         }
-      : null,
+      : airspaceAssessment,
   })
 
   if (error) throw new Error(`Unable to save report: ${error.message}`)
 
   await saveMedia(supabase, user.id, report.id, report.evidence)
 
-  if (intelligence) {
+  if (intelligence || airspaceAssessment) {
+    const combinedAssessment = intelligence
+      ? { ...intelligence, airspace: airspaceAssessment }
+      : {
+          verdict: "inconclusive",
+          confidence: 0,
+          summary: "Airspace-only assessment",
+          aircraftNearby: [],
+          astronomyMatches: [],
+          generatedAt: new Date().toISOString(),
+          dataSources: [{ name: "ICIT Airspace Intelligence", status: "ok" }],
+          airspace: airspaceAssessment,
+        }
     const { error: enrichmentError } = await supabase.from("report_enrichment").insert({
       report_id: report.id,
       source: "icit-intelligence-v1",
-      classification: intelligence.verdict,
-      confidence: intelligence.confidence,
-      priority: intelligence.confidence >= 0.75 ? "high" : "medium",
+      classification: intelligence?.verdict ?? "inconclusive",
+      confidence: intelligence?.confidence ?? 0,
+      priority:
+        airspaceAssessment?.riskLevel === "CRITICAL" || airspaceAssessment?.riskLevel === "HIGH"
+          ? "high"
+          : (intelligence?.confidence ?? 0) >= 0.75
+            ? "high"
+            : "medium",
       recommended_action:
-        intelligence.verdict === "likely_drone"
+        airspaceAssessment?.recommendedActions[0] ?? (intelligence?.verdict === "likely_drone"
           ? "Prioritise reviewer validation"
-          : "Review supporting evidence",
-      airspace: { nearby_flights: intelligence.aircraftNearby },
-      astronomy: { matches: intelligence.astronomyMatches },
-      assessment: intelligence,
+          : "Review supporting evidence"),
+      airspace: {
+        nearby_flights: intelligence?.aircraftNearby ?? [],
+        assessment: airspaceAssessment,
+      },
+      astronomy: { matches: intelligence?.astronomyMatches ?? [] },
+      assessment: combinedAssessment,
       enrichment_version: "1.0",
     })
     if (enrichmentError) {
       throw new Error(`Report saved, but intelligence enrichment failed: ${enrichmentError.message}`)
+    }
+  }
+
+  if (airspaceAssessment) {
+    const { error: riskError } = await supabase.from("risk_assessments").insert({
+      report_id: report.id,
+      user_id: user.id,
+      latitude: location.lat,
+      longitude: location.lng,
+      altitude_metres: approximateAltitudeMetres(report.altitude),
+      assessed_for: report.createdAt,
+      risk_level: airspaceAssessment.riskLevel,
+      risk_score: airspaceAssessment.score,
+      restriction_ids: airspaceAssessment.restrictions.map((item) => item.id),
+      result: airspaceAssessment,
+      engine_version: AIRSPACE_RISK_ENGINE_VERSION,
+    })
+    if (riskError) {
+      console.error("[icit] report saved but risk assessment audit insert failed", {
+        reportId: report.id,
+        message: riskError.message,
+      })
     }
   }
 

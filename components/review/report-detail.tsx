@@ -3,7 +3,7 @@
 import { AlertDialog } from "@base-ui/react/alert-dialog"
 import { Dialog } from "@base-ui/react/dialog"
 import { useState } from "react"
-import { Check, Film, Gavel, Lightbulb, Loader2, MapPin, Mountain, Plane, ShieldAlert, Trash2, X } from "lucide-react"
+import { Check, CloudSun, Film, Gavel, Lightbulb, Loader2, MapPin, Mountain, Plane, ShieldAlert, Trash2, Wind, X } from "lucide-react"
 import { VerdictBadge } from "@/components/report/verdict"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -83,6 +83,104 @@ export function ReportDetail({
             </span>
           </div>
           <p className="mt-2 text-sm leading-relaxed">{report.intelligence.summary}</p>
+        </div>
+      ) : null}
+
+      {report.intelligence?.airspace ? (
+        <div className="rounded-xl border border-border bg-card/70 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <SectionTitle icon={ShieldAlert}>Airspace Intelligence</SectionTitle>
+            <span
+              className={cn(
+                "rounded-full border px-2.5 py-0.5 text-[11px] font-semibold",
+                report.intelligence.airspace.riskLevel === "CRITICAL" && "border-destructive/50 bg-destructive/15 text-destructive",
+                report.intelligence.airspace.riskLevel === "HIGH" && "border-orange-500/50 bg-orange-500/15 text-orange-600 dark:text-orange-300",
+                report.intelligence.airspace.riskLevel === "MEDIUM" && "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+                report.intelligence.airspace.riskLevel === "LOW" && "border-emerald-500/50 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+              )}
+            >
+              {report.intelligence.airspace.riskLevel} · {report.intelligence.airspace.score}/100
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <AirspaceCount label="Permanent" count={report.intelligence.airspace.permanentRestrictions.length} />
+            <AirspaceCount label="Temporary" count={report.intelligence.airspace.temporaryRestrictions.length} />
+            <AirspaceCount label="Infrastructure" count={report.intelligence.airspace.criticalInfrastructure.length} />
+          </div>
+          {report.intelligence.airspace.restrictions.length > 0 ? (
+            <ul className="mt-3 divide-y divide-border rounded-lg border border-border bg-background/50 px-3">
+              {report.intelligence.airspace.restrictions.map((restriction) => (
+                <li key={restriction.id} className="py-2.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">{restriction.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {restriction.subCategory.replaceAll("_", " ")} · {restriction.legalStatus}
+                      </p>
+                    </div>
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                      {restriction.inside ? "Inside" : `${Math.round(restriction.distanceMetres)}m`}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-muted-foreground">No indexed restrictions intersect this report location.</p>
+          )}
+          {report.intelligence.airspace.operationalRisks.length > 0 ? (
+            <div className="mt-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Operational risks</p>
+              <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs leading-relaxed">
+                {report.intelligence.airspace.operationalRisks.map((risk) => <li key={risk}>{risk}</li>)}
+              </ul>
+            </div>
+          ) : null}
+          <div className="mt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recommended actions</p>
+            <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs leading-relaxed">
+              {report.intelligence.airspace.recommendedActions.map((action) => <li key={action}>{action}</li>)}
+            </ul>
+          </div>
+        </div>
+      ) : null}
+
+      {report.intelligence?.weather ? (
+        <div className="rounded-xl border border-border bg-card/70 p-4">
+          <SectionTitle icon={CloudSun}>Weather at time of report</SectionTitle>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg border border-border bg-background/50 p-3">
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Wind className="size-3.5" /> Wind speed
+              </p>
+              <p className="mt-1 font-mono text-lg font-semibold">
+                {report.intelligence.weather.windSpeedMph} mph
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {report.intelligence.weather.windSpeedMps.toFixed(1)} m/s
+                {report.intelligence.weather.windDirectionDegrees != null
+                  ? ` · ${Math.round(report.intelligence.weather.windDirectionDegrees)}°`
+                  : ""}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-background/50 p-3">
+              <p className="text-xs text-muted-foreground">Conditions</p>
+              <p className="mt-1 text-sm font-semibold capitalize">
+                {report.intelligence.weather.conditions ?? "Current conditions"}
+              </p>
+              {report.intelligence.weather.temperatureC != null ? (
+                <p className="text-xs text-muted-foreground">
+                  {Math.round(report.intelligence.weather.temperatureC)}°C
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Captured {new Date(report.intelligence.weather.observedAt).toLocaleString()}
+            {report.intelligence.weather.windGustMph != null
+              ? ` · gusts ${report.intelligence.weather.windGustMph} mph`
+              : ""}
+          </p>
         </div>
       ) : null}
 
@@ -334,6 +432,15 @@ export function ReportDetail({
         </AlertDialog.Portal>
       </AlertDialog.Root>
 
+    </div>
+  )
+}
+
+function AirspaceCount({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="rounded-lg border border-border bg-background/50 px-2 py-2.5">
+      <p className="font-mono text-lg font-semibold">{count}</p>
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
     </div>
   )
 }

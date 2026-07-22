@@ -4,16 +4,10 @@ import "leaflet/dist/leaflet.css"
 
 import type * as L from "leaflet"
 import { useEffect, useRef, useState } from "react"
-import { Check, Flame, Layers, MapPinned, Plane } from "lucide-react"
-
-// leaflet.heat has no bundled types; describe the bits we use.
-type HeatPoint = [number, number, number]
-type HeatLayer = L.Layer & { setLatLngs: (points: HeatPoint[]) => void }
-type LeafletWithHeat = typeof import("leaflet") & {
-  heatLayer: (points: HeatPoint[], options?: Record<string, unknown>) => HeatLayer
-}
+import { Check, ChevronDown, Flame, Layers, MapPinned, Plane } from "lucide-react"
 
 import type { Aircraft, AircraftProviderName } from "@/lib/aircraft"
+import { buildCanonicalAirspaceLayer, loadAirspaceBounds } from "@/lib/airspace/map"
 import type { DroneReport, Verdict } from "@/lib/types"
 import { UK_FLIGHT_RESTRICTION_ZONES, zonesContaining } from "@/lib/uk-frz"
 import {
@@ -51,11 +45,42 @@ const LEGEND: { label: string; color: string }[] = [
   { label: "Inconclusive", color: VERDICT_COLOR.inconclusive },
 ]
 
+const INTELLIGENCE_LAYERS = [
+  { id: "frz", label: "FRZ", categories: ["frz"], color: "#ef4444" },
+  { id: "notam", label: "NOTAM", categories: ["notam", "temporary_aviation"], color: "#f97316" },
+  { id: "military", label: "Military", categories: ["military"], color: "#16a34a" },
+  { id: "police", label: "Police", categories: ["police", "police_air_operation"], color: "#2563eb" },
+  { id: "prison", label: "Prison", categories: ["prison"], color: "#a855f7" },
+  { id: "critical", label: "Critical Infrastructure", categories: ["critical_infrastructure"], color: "#dc2626" },
+  { id: "airports", label: "Airports", categories: ["airport", "aerodrome"], color: "#06b6d4" },
+  { id: "utilities", label: "Utilities", categories: ["power_station", "substation", "water_treatment", "reservoir", "oil_gas", "telecom"], color: "#eab308" },
+  { id: "environmental", label: "Environmental", categories: ["advisory"], color: "#22c55e" },
+] as const
+
 /** Larger dots when zoomed out (country view), smaller when zoomed in. */
 function dotSizeForZoom(zoom: number) {
   const z = Math.max(5, Math.min(18, zoom))
   const t = (z - 5) / (18 - 5)
   return Math.round(20 - t * 12) // 20px → 8px
+}
+
+function clusterSightingPoints(map: L.Map, points: [number, number][], thresholdPixels = 96) {
+  const clusters: { points: [number, number][]; pixelX: number; pixelY: number }[] = []
+  for (const point of points) {
+    const pixel = map.latLngToContainerPoint(point)
+    const cluster = clusters.find(
+      (candidate) => Math.hypot(pixel.x - candidate.pixelX, pixel.y - candidate.pixelY) <= thresholdPixels,
+    )
+    if (!cluster) {
+      clusters.push({ points: [point], pixelX: pixel.x, pixelY: pixel.y })
+      continue
+    }
+    const previousCount = cluster.points.length
+    cluster.points.push(point)
+    cluster.pixelX = (cluster.pixelX * previousCount + pixel.x) / cluster.points.length
+    cluster.pixelY = (cluster.pixelY * previousCount + pixel.y) / cluster.points.length
+  }
+  return clusters.map((cluster) => cluster.points)
 }
 
 function markerHtml(
@@ -111,9 +136,9 @@ function aircraftColor(altitudeM: number | null) {
 /** A top-down plane silhouette (nose pointing up) rotated to the aircraft's true track. */
 function aircraftIconHtml(heading: number | null, color: string) {
   const rot = heading ?? 0
-  return `<div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:9999px;background:rgba(15,23,42,0.88);border:2px solid ${color};box-shadow:0 2px 8px rgba(0,0,0,0.55);">
-    <svg viewBox="0 0 24 24" width="34" height="34" style="transform:rotate(${rot}deg);filter:drop-shadow(0 1px 2px rgba(0,0,0,0.85));">
-      <path fill="${color}" stroke="#ffffff" stroke-width="0.65" stroke-linejoin="round" d="M12 2c.7 0 1.2.9 1.2 2.2v4.3l8 4.7v2l-8-2.4v4.5l2.2 1.6v1.6L12 19.8l-3.4 1.5v-1.6l2.2-1.6v-4.5l-8 2.4v-2l8-4.7V4.2C10.8 2.9 11.3 2 12 2z"/>
+  return `<div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;">
+    <svg viewBox="0 0 24 24" width="40" height="40" style="transform:rotate(${rot}deg);filter:drop-shadow(0 2px 3px rgba(0,0,0,0.9));">
+      <path fill="${color}" stroke="#ffffff" stroke-width="0.8" stroke-linejoin="round" d="M12 2c.7 0 1.2.9 1.2 2.2v4.3l8 4.7v2l-8-2.4v4.5l2.2 1.6v1.6L12 19.8l-3.4 1.5v-1.6l2.2-1.6v-4.5l-8 2.4v-2l8-4.7V4.2C10.8 2.9 11.3 2 12 2z"/>
     </svg>
   </div>`
 }
@@ -132,7 +157,7 @@ export function ReportsMap({
   const leafletRef = useRef<typeof import("leaflet") | null>(null)
   const markersRef = useRef<L.LayerGroup | null>(null)
   const frzRef = useRef<L.LayerGroup | null>(null)
-  const heatRef = useRef<HeatLayer | null>(null)
+  const heatRef = useRef<L.LayerGroup | null>(null)
   const aircraftRef = useRef<L.LayerGroup | null>(null)
   const aircraftFittedRef = useRef(false)
   const uasRef = useRef<L.GeoJSON | null>(null)
@@ -140,6 +165,7 @@ export function ReportsMap({
   const nsaRef = useRef<L.GeoJSON | null>(null)
   const showNsaRef = useRef(false)
   const sitesRef = useRef<L.GeoJSON | null>(null)
+  const intelligenceLayerRef = useRef<L.GeoJSON | null>(null)
   const showSitesRef = useRef(false)
   const fittedRef = useRef(false)
   const [ready, setReady] = useState(false)
@@ -149,6 +175,8 @@ export function ReportsMap({
   const [showUas, setShowUas] = useState(false)
   const [showNsa, setShowNsa] = useState(false)
   const [showSites, setShowSites] = useState(false)
+  const [layersOpen, setLayersOpen] = useState(true)
+  const [sightingAreaCount, setSightingAreaCount] = useState(0)
   const [aircraftCount, setAircraftCount] = useState<number | null>(null)
   const [liveAircraft, setLiveAircraft] = useState<Aircraft[]>([])
   const [aircraftUpdatedAt, setAircraftUpdatedAt] = useState<string | null>(null)
@@ -156,6 +184,10 @@ export function ReportsMap({
   const [aircraftProvider, setAircraftProvider] = useState<AircraftProviderName | null>(null)
   const [aircraftViewportRevision, setAircraftViewportRevision] = useState(0)
   const [zoom, setZoom] = useState(5)
+  const [enabledIntelligenceLayers, setEnabledIntelligenceLayers] = useState<Set<string>>(
+    () => new Set(["frz", "notam"]),
+  )
+  const [airspaceUnavailable, setAirspaceUnavailable] = useState(false)
 
   // Init map once.
   useEffect(() => {
@@ -163,8 +195,6 @@ export function ReportsMap({
     void (async () => {
       if (!el.current || mapRef.current) return
       const L = (await import("leaflet")).default
-      // leaflet.heat patches L with L.heatLayer().
-      await import("leaflet.heat")
       if (cancelled || !el.current || mapRef.current) return
       leafletRef.current = L
 
@@ -191,14 +221,8 @@ export function ReportsMap({
       frz.addTo(map)
       frzRef.current = frz
 
-      // Heatmap layer (off by default; toggled like the FRZ layer).
-      heatRef.current = (L as LeafletWithHeat).heatLayer([], {
-        radius: 28,
-        blur: 22,
-        maxZoom: 13,
-        minOpacity: 0.35,
-        gradient: { 0.2: "#3b9eff", 0.45: "#22c55e", 0.7: "#f59e0b", 1: "#ef4444" },
-      })
+      // One aggregate incident-area circle, populated from the current reports.
+      heatRef.current = L.layerGroup()
 
       // UAS airspace restrictions layer — real UK AIP geometry (off by default).
       // Loaded asynchronously from the converted GeoJSON dataset.
@@ -247,6 +271,7 @@ export function ReportsMap({
       uasRef.current = null
       nsaRef.current = null
       sitesRef.current = null
+      intelligenceLayerRef.current = null
       fittedRef.current = false
     }
   }, [])
@@ -260,7 +285,7 @@ export function ReportsMap({
     else map.removeLayer(frz)
   }, [showFrz, ready])
 
-  // Toggle heatmap visibility.
+  // Toggle the aggregate sighting-area visibility.
   useEffect(() => {
     const map = mapRef.current
     const heat = heatRef.current
@@ -409,6 +434,49 @@ export function ReportsMap({
     else map.removeLayer(sites)
   }, [showSites, ready])
 
+  // Query canonical PostGIS restrictions for the visible map. Requests are
+  // spatially bounded and category-filtered so the map never downloads the full dataset.
+  useEffect(() => {
+    if (!ready) return
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const map = mapRef.current
+        const L = leafletRef.current
+        if (!map || !L) return
+        const categories = INTELLIGENCE_LAYERS
+          .filter((layer) => enabledIntelligenceLayers.has(layer.id))
+          .flatMap((layer) => [...layer.categories])
+        intelligenceLayerRef.current?.removeFrom(map)
+        intelligenceLayerRef.current = null
+        if (categories.length === 0) return
+        const bounds = map.getBounds()
+        try {
+          const collection = await loadAirspaceBounds(
+            {
+              minLon: bounds.getWest(), minLat: bounds.getSouth(),
+              maxLon: bounds.getEast(), maxLat: bounds.getNorth(),
+            },
+            categories,
+          )
+          if (cancelled || !mapRef.current) return
+          const layer = buildCanonicalAirspaceLayer(L, collection).addTo(map)
+          intelligenceLayerRef.current = layer
+          setAirspaceUnavailable(false)
+        } catch (error) {
+          if (!cancelled) {
+            console.error("[icit] canonical airspace layer unavailable", error)
+            setAirspaceUnavailable(true)
+          }
+        }
+      })()
+    }, 250)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [ready, aircraftViewportRevision, enabledIntelligenceLayers])
+
   // Draw / update report markers.
   useEffect(() => {
     const L = leafletRef.current
@@ -444,8 +512,52 @@ export function ReportsMap({
       points.push([r.location.lat, r.location.lng])
     }
 
-    // Update heatmap intensity points (lat, lng, weight).
-    heatRef.current?.setLatLngs(points.map(([lat, lng]) => [lat, lng, 0.8] as HeatPoint))
+    // Cluster reports by their on-screen proximity. Clusters merge when zoomed
+    // out and split into local groups or individual sightings when zoomed in.
+    const summaryLayer = heatRef.current
+    summaryLayer?.clearLayers()
+    const viewport = map.getBounds()
+    const visiblePoints = points.filter(([lat, lng]) => viewport.contains([lat, lng]))
+    setSightingAreaCount(visiblePoints.length)
+    if (summaryLayer && visiblePoints.length > 0) {
+      for (const clusterPoints of clusterSightingPoints(map, visiblePoints)) {
+        const bounds = L.latLngBounds(clusterPoints)
+        const center = bounds.getCenter()
+        const centerPixel = map.latLngToContainerPoint(center)
+        const minimumRadius = map.distance(
+          center,
+          map.containerPointToLatLng(L.point(centerPixel.x + 32, centerPixel.y)),
+        )
+        const radius = Math.max(
+          minimumRadius,
+          ...clusterPoints.map(([lat, lng]) => map.distance(center, L.latLng(lat, lng)) * 1.12),
+        )
+        const count = clusterPoints.length
+        const circle = L.circle(center, {
+          radius,
+          color: "#dc2626",
+          weight: 3,
+          opacity: 0.95,
+          fillColor: "#ef4444",
+          fillOpacity: 0.22,
+        })
+          .bindTooltip(`${count} sighting${count === 1 ? "" : "s"} in this cluster`, { sticky: true })
+          .addTo(summaryLayer)
+        circle.on("click", () => {
+          if (count === 1) map.setView(center, Math.min(18, map.getZoom() + 2))
+          else map.fitBounds(bounds.pad(0.35), { maxZoom: 17 })
+        })
+        L.marker(center, {
+          interactive: false,
+          icon: L.divIcon({
+            className: "",
+            html: `<div style="display:flex;min-width:42px;height:42px;padding:0 10px;align-items:center;justify-content:center;border-radius:9999px;background:#dc2626;color:white;border:3px solid white;box-shadow:0 3px 12px rgba(0,0,0,.45);font-weight:800;font-size:14px;white-space:nowrap;">${count}</div>`,
+            iconSize: [42, 42],
+            iconAnchor: [21, 21],
+          }),
+        }).addTo(summaryLayer)
+      }
+    }
 
     // Fit to reports the first time we have any.
     if (!fittedRef.current && points.length > 0) {
@@ -458,7 +570,7 @@ export function ReportsMap({
       }
       fittedRef.current = true
     }
-  }, [reports, selectedId, ready, onSelect, zoom])
+  }, [reports, selectedId, ready, onSelect, zoom, aircraftViewportRevision])
 
   // Fly to the selected report and zoom in close enough to read the ground.
   useEffect(() => {
@@ -486,12 +598,23 @@ export function ReportsMap({
         </div>
       ) : null}
 
-      <div className="absolute right-3 top-3 z-[500] w-52 rounded-lg border border-border bg-background/85 p-2 shadow-md backdrop-blur">
-        <p className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="absolute right-3 top-3 z-[500] w-56 rounded-lg border border-border bg-background/85 p-2 shadow-md backdrop-blur">
+        <button
+          type="button"
+          onClick={() => setLayersOpen((open) => !open)}
+          className={cn(
+            "flex w-full items-center gap-1.5 rounded-md px-0.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground",
+            layersOpen && "mb-1.5",
+          )}
+          aria-expanded={layersOpen}
+          aria-controls="review-map-layers"
+        >
           <Layers className="size-3.5" />
-          Map layers
-        </p>
-        <div className="flex flex-col gap-1">
+          <span className="flex-1 text-left">Map layers</span>
+          <ChevronDown className={cn("size-3.5 transition-transform", !layersOpen && "-rotate-90")} />
+        </button>
+        {layersOpen ? (
+        <div id="review-map-layers" className="flex max-h-[47vh] flex-col gap-1 overflow-y-auto pr-0.5">
           <button
             type="button"
             onClick={() => setShowFrz((s) => !s)}
@@ -509,6 +632,39 @@ export function ReportsMap({
               aria-hidden={!showFrz}
             />
           </button>
+          <div className="my-1.5 border-t border-border pt-1.5">
+            <p className="mb-1 px-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Airspace intelligence
+            </p>
+            {INTELLIGENCE_LAYERS.map((layer) => {
+              const enabled = enabledIntelligenceLayers.has(layer.id)
+              return (
+                <button
+                  key={layer.id}
+                  type="button"
+                  onClick={() => setEnabledIntelligenceLayers((current) => {
+                    const next = new Set(current)
+                    if (next.has(layer.id)) next.delete(layer.id)
+                    else next.add(layer.id)
+                    return next
+                  })}
+                  className={cn(
+                    "mb-1 flex w-full items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors last:mb-0",
+                    enabled
+                      ? "border-primary/40 bg-primary/15 text-foreground"
+                      : "border-border bg-background/60 text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <span className="size-2.5 shrink-0 rounded-sm" style={{ backgroundColor: layer.color }} aria-hidden />
+                  <span className="flex-1 text-left">{layer.label}</span>
+                  <Check className={cn("size-3.5", enabled ? "opacity-100" : "opacity-0")} aria-hidden={!enabled} />
+                </button>
+              )
+            })}
+            {airspaceUnavailable ? (
+              <p className="px-1 pt-1 text-[10px] leading-tight text-destructive">Live restriction intelligence unavailable</p>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={() => setShowHeat((s) => !s)}
@@ -520,7 +676,7 @@ export function ReportsMap({
             )}
           >
             <Flame className="size-3.5 shrink-0" />
-            <span className="flex-1 text-left">Sighting heatmap</span>
+            <span className="flex-1 text-left">Sighting clusters ({sightingAreaCount} visible)</span>
             <Check
               className={cn("size-3.5 shrink-0 transition-opacity", showHeat ? "opacity-100" : "opacity-0")}
               aria-hidden={!showHeat}
@@ -603,6 +759,7 @@ export function ReportsMap({
             />
           </button>
         </div>
+        ) : null}
       </div>
 
       <div className="absolute bottom-3 left-3 z-[500] rounded-md border border-border bg-background/85 p-2.5 text-[11px] shadow-md backdrop-blur">

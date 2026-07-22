@@ -49,7 +49,7 @@ Import these with **Contains secret values** enabled:
 | `OPENSKY_CLIENT_SECRET` | Yes | OpenSky OAuth client credentials. |
 | `OPENSKY_TIMEOUT_MS` | No | OpenSky request timeout; defaults to 8000 ms. |
 | `AIRPLANES_LIVE_TIMEOUT_MS` | No | Airplanes.live request timeout; defaults to 8000 ms. |
-| `OPENWEATHER_API_KEY` | No | Correctly named OpenWeather server key for future weather integration. |
+| `OPENWEATHER_API_KEY` | No | Enables the current weather and wind snapshot stored with generated reports. |
 | `SUPABASE_SERVICE_ROLE_KEY` | No | Correctly named server-only Supabase administrative key. |
 | `OPENAI_INTELLIGENCE_MODEL` | No | Overrides the default `gpt-5.4-mini`. |
 | `DATABASE_URL` | No | Reserved for the currently unused Drizzle/Postgres module. |
