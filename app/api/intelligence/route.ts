@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { fetchOpenSkyStates } from "@/lib/opensky"
+import { aircraftService } from "@/lib/aircraft"
 import type {
   AircraftMatch,
   AstronomyMatch,
@@ -7,6 +7,9 @@ import type {
 } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
+export const runtime = "nodejs"
+export const preferredRegion = "fra1"
+export const maxDuration = 60
 
 function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number) {
   const R = 6371
@@ -35,34 +38,21 @@ async function fetchWithTimeout(url: string, ms = 7000) {
 async function getAircraft(lat: number, lng: number) {
   // ~28km bounding box around the observer.
   const d = 0.25
-  const { states } = await fetchOpenSkyStates({
+  const result = await aircraftService.getAircraft({
     lamin: lat - d,
     lomin: lng - d,
     lamax: lat + d,
     lomax: lng + d,
   })
-  if (!states) return { aircraft: null as AircraftMatch[] | null }
-  const aircraft: AircraftMatch[] = states
-    .map((s) => {
-      const lon = s[5] as number | null
-      const la = s[6] as number | null
-      if (la == null || lon == null) return null
-      return {
-        icao24: String(s[0] ?? "").trim(),
-        callsign: String(s[1] ?? "").trim() || "—",
-        origin: String(s[2] ?? "").trim() || "Unknown",
-        distanceKm: Number(haversineKm(lat, lng, la, lon).toFixed(1)),
-        altitudeM: (s[13] as number | null) ?? (s[7] as number | null),
-        velocityMs: (s[9] as number | null) ?? null,
-        headingDeg: (s[10] as number | null) ?? null,
-        lat: la,
-        lng: lon,
-      } as AircraftMatch
-    })
-    .filter((a): a is AircraftMatch => a !== null)
+  if (!result.ok) return { aircraft: null as AircraftMatch[] | null, result }
+  const aircraft: AircraftMatch[] = result.aircraft
+    .map((item) => ({
+      ...item,
+      distanceKm: Number(haversineKm(lat, lng, item.latitude, item.longitude).toFixed(1)),
+    }))
     .sort((a, b) => a.distanceKm - b.distanceKm)
     .slice(0, 6)
-  return { aircraft }
+  return { aircraft, result }
 }
 
 async function getIss(lat: number, lng: number): Promise<AstronomyMatch[]> {
@@ -220,8 +210,13 @@ export async function POST(request: Request) {
 
   const sources: IntelligenceAssessment["dataSources"] = []
 
-  const { aircraft } = await getAircraft(lat, lng)
-  sources.push({ name: "OpenSky aircraft network", status: aircraft ? "ok" : "fallback" })
+  const { aircraft, result: aircraftResult } = await getAircraft(lat, lng)
+  sources.push({
+    name: aircraftResult.ok
+      ? `${aircraftResult.provider === "opensky" ? "OpenSky" : "Airplanes.live"} aircraft network`
+      : "Live aircraft providers",
+    status: aircraftResult.ok ? (aircraftResult.fallbackUsed ? "fallback" : "ok") : "error",
+  })
 
   const iss = await getIss(lat, lng)
   sources.push({ name: "ISS tracking (wheretheiss.at)", status: iss.length ? "ok" : "fallback" })

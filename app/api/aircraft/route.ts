@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server"
 
-import { fetchOpenSkyStates } from "@/lib/opensky"
-import type { AircraftMatch } from "@/lib/types"
+import { aircraftService } from "@/lib/aircraft"
 
 export const dynamic = "force-dynamic"
+export const runtime = "nodejs"
+export const preferredRegion = "fra1"
+export const maxDuration = 60
 
 function numberParam(value: string | null, fallback: number) {
   const parsed = Number(value)
@@ -30,64 +32,48 @@ export async function GET(request: Request) {
   const safeLomin = Math.max(-180, centerLng - Math.min(2, (lomax - lomin) / 2))
   const safeLomax = Math.min(180, centerLng + Math.min(2, (lomax - lomin) / 2))
 
-  const result = await fetchOpenSkyStates({
+  const result = await aircraftService.getAircraft({
     lamin: safeLamin,
     lomin: safeLomin,
     lamax: safeLamax,
     lomax: safeLomax,
   })
-  if (!result.states) {
-    const responseBody = {
-      aircraft: [],
-      authenticated: result.authenticated,
-      credentialsConfigured: result.credentialsConfigured,
-      authenticationStatus: result.authenticationStatus,
-      unavailable: true,
-    }
-    console.error(
-      JSON.stringify({
-        service: "opensky",
-        event: "aircraft_api_upstream_unavailable",
-        responseBody,
-      }),
+  if (!result.ok) {
+    return NextResponse.json(
+      {
+        provider: result.provider,
+        fallbackUsed: result.fallbackUsed,
+        aircraft: result.aircraft,
+        diagnostics: result.diagnostics,
+        error: result.error,
+        updatedAt: new Date().toISOString(),
+        unavailable: true,
+      },
+      { status: 503 },
     )
-    return NextResponse.json(responseBody)
   }
 
-  const aircraft = result.states
-    .map((state): AircraftMatch | null => {
-      const lng = state[5] as number | null
-      const lat = state[6] as number | null
-      if (lat == null || lng == null) return null
-      return {
-        icao24: String(state[0] ?? "").trim(),
-        callsign: String(state[1] ?? "").trim() || "Unknown",
-        origin: String(state[2] ?? "").trim() || "Unknown",
-        distanceKm: 0,
-        altitudeM: (state[13] as number | null) ?? (state[7] as number | null),
-        velocityMs: (state[9] as number | null) ?? null,
-        headingDeg: (state[10] as number | null) ?? null,
-        lat,
-        lng,
-      }
-    })
-    .filter((aircraft): aircraft is AircraftMatch => aircraft !== null)
-    .slice(0, 400)
-
   const responseBody = {
-    aircraft,
-    authenticated: result.authenticated,
-    credentialsConfigured: result.credentialsConfigured,
-    authenticationStatus: result.authenticationStatus,
+    provider: result.provider,
+    fallbackUsed: result.fallbackUsed,
+    aircraft: result.aircraft,
+    diagnostics: result.diagnostics,
     updatedAt: new Date().toISOString(),
+    unavailable: false,
   }
   console.info(
     JSON.stringify({
-      service: "opensky",
+      service: "aircraft",
       event: "aircraft_api_response",
-      aircraftParsed: aircraft.length,
-      responseBody,
+      provider: result.provider,
+      fallbackUsed: result.fallbackUsed,
+      aircraftParsed: result.aircraft.length,
+      diagnostics: result.diagnostics,
     }),
   )
-  return NextResponse.json(responseBody)
+  return NextResponse.json(responseBody, {
+    headers: {
+      "Cache-Control": "public, s-maxage=8, stale-while-revalidate=2",
+    },
+  })
 }

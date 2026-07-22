@@ -142,7 +142,7 @@ export function ReportDetail({
               <li key={a.icao24} className="flex items-center justify-between py-2 text-sm">
                 <span className="font-mono">{a.callsign}</span>
                 <span className="text-muted-foreground">
-                  {a.distanceKm} km · {a.origin}
+                  {a.distanceKm} km · {a.originCountry ?? a.registration ?? "Unknown"}
                 </span>
               </li>
             ))}

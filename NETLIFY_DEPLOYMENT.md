@@ -47,6 +47,10 @@ Import these with **Contains secret values** enabled:
 | `OPENAI_API_KEY` | Yes | Server-side intelligence assessment. |
 | `OPENSKY_CLIENT_ID` | Yes | OpenSky OAuth client credentials. |
 | `OPENSKY_CLIENT_SECRET` | Yes | OpenSky OAuth client credentials. |
+| `OPENSKY_TIMEOUT_MS` | No | OpenSky request timeout; defaults to 8000 ms. |
+| `AIRPLANES_LIVE_TIMEOUT_MS` | No | Airplanes.live request timeout; defaults to 8000 ms. |
+| `OPENWEATHER_API_KEY` | No | Correctly named OpenWeather server key for future weather integration. |
+| `SUPABASE_SERVICE_ROLE_KEY` | No | Correctly named server-only Supabase administrative key. |
 | `OPENAI_INTELLIGENCE_MODEL` | No | Overrides the default `gpt-5.4-mini`. |
 | `DATABASE_URL` | No | Reserved for the currently unused Drizzle/Postgres module. |
 
@@ -101,20 +105,15 @@ The target Supabase project must also have:
 
 ## Known issues
 
-- OpenSky connectivity must be tested from the deployed Netlify function. The
-  previous Vercel deployment resolved OpenSky DNS but timed out while opening a
-  TCP connection to port 443; that result does not predict Netlify's network
-  path.
-- OpenSky and OpenAI are external services with independent rate limits and
-  availability.
-- The current OpenSky diagnostics log complete aircraft API response summaries.
-  Reduce temporary diagnostic verbosity after the connectivity investigation.
+- OpenSky connectivity can vary by cloud runtime. The aircraft service falls
+  back automatically to Airplanes.live and reports both provider statuses.
+- Airplanes.live's public API has usage limits and no uptime SLA. Successful
+  aircraft responses are cached briefly to reduce duplicate requests.
+- OpenSky, Airplanes.live, and OpenAI are external services with independent
+  rate limits and availability.
 - `next/font/google` downloads Geist during the build. A build environment that
   cannot reach Google Fonts will fail, even though Netlify normally permits the
   request.
-- The `lint` package script requires ESLint, but ESLint is not currently listed
-  as a development dependency. The deployment build uses Next.js type checking
-  and does not invoke that script.
 
 ## Troubleshooting
 
@@ -141,13 +140,12 @@ static export and do not set `NETLIFY_NEXT_PLUGIN_SKIP=true`.
 
 ### Aircraft are unavailable
 
-Inspect Netlify Function logs for the structured `opensky` events. Verify:
+Inspect Netlify Function logs for structured `aircraft` provider events. Verify:
 
-- `credentialsConfigured` is `true`;
-- OAuth returns HTTP 200;
-- `authorizationHeaderSent` is `true`;
-- the states request returns HTTP 200;
-- parsed aircraft count is greater than zero for the requested bounding box.
+- `provider`, `status`, `httpStatus`, `durationMs`, and `timeout`;
+- whether `fallback_triggered` was logged;
+- `diagnostics.openskyStatus` and `diagnostics.airplanesStatus` in the API response;
+- the selected provider and parsed aircraft count.
 
 If DNS succeeds but `UND_ERR_CONNECT_TIMEOUT` appears again, provide Netlify
 and OpenSky support with the destination, function region, timestamp, and

@@ -234,7 +234,7 @@ function AssessmentResult({ assessment }: { assessment: IntelligenceAssessment }
               <li key={a.icao24} className="flex items-center justify-between py-2 text-sm">
                 <span className="font-mono">{a.callsign}</span>
                 <span className="text-muted-foreground">
-                  {a.distanceKm} km{a.altitudeM ? ` · ${Math.round(a.altitudeM)} m` : ""}
+                  {a.distanceKm} km{a.altitude ? ` · ${Math.round(a.altitude)} m` : ""}
                 </span>
               </li>
             ))}

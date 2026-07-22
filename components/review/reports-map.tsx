@@ -13,7 +13,8 @@ type LeafletWithHeat = typeof import("leaflet") & {
   heatLayer: (points: HeatPoint[], options?: Record<string, unknown>) => HeatLayer
 }
 
-import type { AircraftMatch, DroneReport, Verdict } from "@/lib/types"
+import type { Aircraft, AircraftProviderName } from "@/lib/aircraft"
+import type { DroneReport, Verdict } from "@/lib/types"
 import { UK_FLIGHT_RESTRICTION_ZONES, zonesContaining } from "@/lib/uk-frz"
 import {
   AIRSPACE_CATEGORY_COLOR,
@@ -135,9 +136,10 @@ export function ReportsMap({
   const [showNsa, setShowNsa] = useState(false)
   const [showSites, setShowSites] = useState(false)
   const [aircraftCount, setAircraftCount] = useState<number | null>(null)
-  const [liveAircraft, setLiveAircraft] = useState<AircraftMatch[]>([])
+  const [liveAircraft, setLiveAircraft] = useState<Aircraft[]>([])
   const [aircraftUpdatedAt, setAircraftUpdatedAt] = useState<string | null>(null)
   const [aircraftUnavailable, setAircraftUnavailable] = useState(false)
+  const [aircraftProvider, setAircraftProvider] = useState<AircraftProviderName | null>(null)
   const [aircraftViewportRevision, setAircraftViewportRevision] = useState(0)
   const [zoom, setZoom] = useState(5)
 
@@ -275,14 +277,16 @@ export function ReportsMap({
         lomax: String(center.lng + lngRadius),
       })
       try {
-        const response = await fetch(`/api/aircraft?${params.toString()}`, { cache: "no-store" })
+        const response = await fetch(`/api/aircraft?${params.toString()}`)
         const data = (await response.json()) as {
-          aircraft?: AircraftMatch[]
+          aircraft?: Aircraft[] | null
+          provider?: AircraftProviderName | null
           updatedAt?: string
           unavailable?: boolean
         }
         if (cancelled) return
-        setLiveAircraft(Array.isArray(data.aircraft) ? data.aircraft : [])
+        if (Array.isArray(data.aircraft)) setLiveAircraft(data.aircraft)
+        setAircraftProvider(data.provider ?? null)
         setAircraftUpdatedAt(data.updatedAt ?? new Date().toISOString())
         setAircraftUnavailable(!response.ok || data.unavailable === true)
       } catch {
@@ -319,21 +323,21 @@ export function ReportsMap({
     let plotted = 0
 
     for (const a of liveAircraft) {
-      if (typeof a.lat !== "number" || typeof a.lng !== "number") continue
+      if (typeof a.latitude !== "number" || typeof a.longitude !== "number") continue
         const icon = L.divIcon({
           className: "",
-          html: aircraftIconHtml(a.headingDeg),
+          html: aircraftIconHtml(a.heading),
           iconSize: [44, 44],
           iconAnchor: [22, 22],
         })
-        const altFt = a.altitudeM != null ? Math.round(a.altitudeM * 3.281) : null
-        const spdKt = a.velocityMs != null ? Math.round(a.velocityMs * 1.944) : null
-        L.marker([a.lat, a.lng], { icon, zIndexOffset: 2000 })
+        const altFt = a.altitude != null ? Math.round(a.altitude * 3.281) : null
+        const spdKt = a.velocity != null ? Math.round(a.velocity * 1.944) : null
+        L.marker([a.latitude, a.longitude], { icon, zIndexOffset: 2000 })
           .bindTooltip(
-            `<strong>${a.callsign}</strong> · ${a.origin}` +
+            `<strong>${a.callsign}</strong> · ${a.originCountry ?? a.registration ?? "Unknown"}` +
               (altFt != null ? `<br/>${altFt.toLocaleString()} ft` : "") +
               (spdKt != null ? ` · ${spdKt} kt` : "") +
-              `<br/><span style="opacity:0.7">Live OpenSky position</span>` +
+              `<br/><span style="opacity:0.7">Live ${a.provider === "opensky" ? "OpenSky" : "Airplanes.live"} position</span>` +
               (aircraftUpdatedAt
                 ? `<br/><span style="opacity:0.7">Updated ${new Date(aircraftUpdatedAt).toLocaleTimeString("en-GB")}</span>`
                 : ""),
@@ -351,8 +355,7 @@ export function ReportsMap({
           .filter((report) => report.location)
           .map((report) => [report.location.lat, report.location.lng] as [number, number]),
         ...liveAircraft
-          .filter((aircraft) => typeof aircraft.lat === "number" && typeof aircraft.lng === "number")
-          .map((aircraft) => [aircraft.lat!, aircraft.lng!] as [number, number]),
+          .map((aircraft) => [aircraft.latitude, aircraft.longitude] as [number, number]),
       ]
       if (points.length > 1) {
         aircraftFittedRef.current = true
@@ -457,6 +460,17 @@ export function ReportsMap({
   return (
     <div className="relative isolate overflow-hidden rounded-lg border border-border">
       <div ref={el} className="h-[58vh] min-h-80 w-full" />
+
+      {showAircraft && aircraftProvider === "airplaneslive" && !aircraftUnavailable ? (
+        <div className="absolute left-1/2 top-3 z-[500] -translate-x-1/2 rounded-full border border-amber-400/40 bg-background/90 px-3 py-1 text-[11px] font-medium text-foreground shadow-md backdrop-blur">
+          Aircraft data provided by Airplanes.live
+        </div>
+      ) : null}
+      {showAircraft && aircraftUnavailable ? (
+        <div className="absolute left-1/2 top-3 z-[500] -translate-x-1/2 rounded-full border border-destructive/40 bg-background/90 px-3 py-1 text-[11px] font-medium text-destructive shadow-md backdrop-blur">
+          Live aircraft temporarily unavailable
+        </div>
+      ) : null}
 
       <div className="absolute right-3 top-3 z-[500] w-52 rounded-lg border border-border bg-background/85 p-2 shadow-md backdrop-blur">
         <p className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -613,7 +627,9 @@ export function ReportsMap({
           {showAircraft && (
             <li className="flex items-center gap-1.5">
               <Plane className="size-3 text-foreground" aria-hidden />
-              <span className="text-foreground">Live aircraft (OpenSky)</span>
+              <span className="text-foreground">
+                Live aircraft{aircraftProvider === "airplaneslive" ? " (Airplanes.live)" : ""}
+              </span>
             </li>
           )}
           {showUas && (

@@ -1,3 +1,5 @@
+import type { Aircraft } from "@/lib/aircraft"
+
 export type DroneType = "Multi-Rotor" | "Fixed Wing" | "Unknown"
 
 export type LightsVisible = "Yes" | "No" | "Unknown"
@@ -38,17 +40,8 @@ export interface ReportLocation {
   deviceHeading: number | null
 }
 
-export interface AircraftMatch {
-  callsign: string
-  icao24: string
+export interface AircraftMatch extends Aircraft {
   distanceKm: number
-  altitudeM: number | null
-  headingDeg: number | null
-  velocityMs: number | null
-  origin: string
-  /** Aircraft position captured at the moment of reporting (for map plotting). */
-  lat?: number
-  lng?: number
 }
 
 export interface AstronomyMatch {
