@@ -1,10 +1,10 @@
 "use client"
 
+import { Dialog } from "@base-ui/react/dialog"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { CheckCircle2, LayoutDashboard, LogOut, Plus } from "lucide-react"
+import { CheckCircle2, LayoutDashboard, LogOut, Plus, X } from "lucide-react"
 import { toast } from "sonner"
-import { Brand } from "@/components/brand"
 import { StepAltitude } from "@/components/report/step-altitude"
 import { StepEvidence } from "@/components/report/step-evidence"
 import { StepIntelligence } from "@/components/report/step-intelligence"
@@ -12,7 +12,8 @@ import { StepLights } from "@/components/report/step-lights"
 import { StepLocation } from "@/components/report/step-location"
 import { StepType } from "@/components/report/step-type"
 import { VerdictBadge } from "@/components/report/verdict"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import {
   type DraftReport,
   type DroneReport,
@@ -30,7 +31,7 @@ import {
 import { createReport } from "@/app/actions/reports"
 import { getCurrentSession, signOut } from "@/app/actions/auth"
 
-type Step = "type" | "lights" | "altitude" | "evidence" | "location" | "intelligence" | "complete"
+type Step = "type" | "lights" | "altitude" | "evidence" | "location" | "intelligence"
 
 const STEP_COUNT = 6
 
@@ -74,12 +75,6 @@ export default function ReportPage() {
     void signOut()
     clearSession()
     router.replace("/")
-  }
-
-  function reset() {
-    setDraft(EMPTY_DRAFT)
-    setSaved(null)
-    setStep("type")
   }
 
   function selectLights(v: LightsVisible) {
@@ -126,78 +121,84 @@ export default function ReportPage() {
       setSubmitting(false)
       return
     }
+    // Reset the workflow behind the confirmation modal so dismissing it reveals
+    // a clean first step ready for another sighting.
+    setDraft(EMPTY_DRAFT)
+    setStep("type")
     setSaved(report)
-    setStep("complete")
     setSubmitting(false)
-  }
-
-  if (step === "complete" && saved) {
-    return (
-      <main className="flex min-h-screen flex-col">
-        <header className="flex items-center justify-between border-b border-border px-4 py-3">
-          <Brand size="sm" />
-          <div className="flex items-center gap-1">
-            {session.role === "admin" ? (
-              <Button variant="ghost" size="sm" onClick={() => router.push("/review")}>
-                <LayoutDashboard className="size-4" />
-                Dashboard
-              </Button>
-            ) : null}
-            <Button variant="ghost" size="sm" onClick={logout}>
-              <LogOut className="size-4" />
-              Sign out
-            </Button>
-          </div>
-        </header>
-        <div className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-4 py-10 text-center">
-          <span className="flex size-16 items-center justify-center rounded-full bg-chart-3/15 text-chart-3">
-            <CheckCircle2 className="size-8" />
-          </span>
-          <h1 className="mt-5 text-2xl font-semibold tracking-tight">Report submitted</h1>
-          <p className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground">
-            Your sighting has been sent to the ICIT reviewer team. Keep this reference for any
-            follow-up.
-          </p>
-          <div className="mt-5 w-full rounded-xl border border-border bg-card/70 p-4">
-            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
-              Reference
-            </p>
-            <p className="mt-1 font-mono text-lg font-semibold text-primary">{saved.reference}</p>
-            {saved.intelligence ? (
-              <div className="mt-3 flex justify-center">
-                <VerdictBadge verdict={saved.intelligence.verdict} />
-              </div>
-            ) : null}
-          </div>
-          <div className="mt-6 flex w-full flex-col gap-2">
-            <Button onClick={reset}>
-              <Plus className="size-4" />
-              Submit another sighting
-            </Button>
-            {session.role === "admin" ? (
-              <Button variant="secondary" onClick={() => router.push("/review")}>
-                <LayoutDashboard className="size-4" />
-                Open reviewer dashboard
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      </main>
-    )
   }
 
   switch (step) {
     case "type":
       return (
-        <StepType
-          stepIndex={0}
-          stepCount={STEP_COUNT}
-          value={draft.droneType}
-          onSelect={(v) => {
-            setDraft((d) => ({ ...d, droneType: v }))
-            setStep("lights")
-          }}
-        />
+        <>
+          <StepType
+            stepIndex={0}
+            stepCount={STEP_COUNT}
+            value={draft.droneType}
+            onSelect={(v) => {
+              setDraft((d) => ({ ...d, droneType: v }))
+              setStep("lights")
+            }}
+          />
+          <Dialog.Root open={saved !== null} onOpenChange={(open) => !open && setSaved(null)}>
+            <Dialog.Portal>
+              <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+              <Dialog.Viewport className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <Dialog.Popup className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center shadow-2xl outline-none transition duration-200 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
+                  <Dialog.Close
+                    className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label="Close confirmation"
+                  >
+                    <X className="size-4" />
+                  </Dialog.Close>
+                  <span className="mx-auto flex size-16 items-center justify-center rounded-full bg-chart-3/15 text-chart-3">
+                    <CheckCircle2 className="size-8" />
+                  </span>
+                  <Dialog.Title className="mt-5 text-2xl font-semibold tracking-tight">
+                    Thank you for submitting your report
+                  </Dialog.Title>
+                  <Dialog.Description className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground">
+                    Your sighting has been sent to the ICIT reviewer team. Keep this reference for
+                    any follow-up.
+                  </Dialog.Description>
+                  {saved ? (
+                    <div className="mt-5 rounded-xl border border-border bg-background/60 p-4">
+                      <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                        Reference
+                      </p>
+                      <p className="mt-1 font-mono text-lg font-semibold text-primary">
+                        {saved.reference}
+                      </p>
+                      {saved.intelligence ? (
+                        <div className="mt-3 flex justify-center">
+                          <VerdictBadge verdict={saved.intelligence.verdict} />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div className="mt-6 flex flex-col gap-2">
+                    <Dialog.Close className={cn(buttonVariants(), "w-full")}>
+                      <Plus className="size-4" />
+                      Submit another sighting
+                    </Dialog.Close>
+                    {session.role === "admin" ? (
+                      <Button variant="secondary" onClick={() => router.push("/review")}>
+                        <LayoutDashboard className="size-4" />
+                        Open reviewer dashboard
+                      </Button>
+                    ) : null}
+                    <Button variant="ghost" onClick={logout}>
+                      <LogOut className="size-4" />
+                      Sign out
+                    </Button>
+                  </div>
+                </Dialog.Popup>
+              </Dialog.Viewport>
+            </Dialog.Portal>
+          </Dialog.Root>
+        </>
       )
     case "lights":
       return (
