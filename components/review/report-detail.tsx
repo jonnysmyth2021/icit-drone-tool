@@ -1,6 +1,7 @@
 "use client"
 
 import { AlertDialog } from "@base-ui/react/alert-dialog"
+import { Dialog } from "@base-ui/react/dialog"
 import { useState } from "react"
 import { Check, Film, Gavel, Lightbulb, Loader2, MapPin, Mountain, Plane, ShieldAlert, Trash2, X } from "lucide-react"
 import { VerdictBadge } from "@/components/report/verdict"
@@ -33,6 +34,7 @@ export function ReportDetail({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [viewingImage, setViewingImage] = useState<{ src: string; alt: string } | null>(null)
   const decided = report.status === "confirmed" || report.status === "rejected"
 
   function decide(status: ReportStatus) {
@@ -129,7 +131,21 @@ export function ReportDetail({
             {report.evidence.map((e) => (
               <li key={e.id} className="flex gap-3 rounded-lg border border-border bg-card/70 p-2.5">
                 <div className="size-16 shrink-0 overflow-hidden rounded-md bg-secondary">
-                  {e.preview ? (
+                  {e.kind === "photo" && e.preview ? (
+                    <button
+                      type="button"
+                      className="size-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      onClick={() => setViewingImage({ src: e.preview, alt: e.fileName })}
+                      aria-label={`View ${e.fileName}`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={e.preview}
+                        alt={e.fileName}
+                        className="size-full object-cover transition-transform hover:scale-105"
+                      />
+                    </button>
+                  ) : e.preview ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={e.preview || "/placeholder.svg"} alt={e.fileName} className="size-full object-cover" />
                   ) : (
@@ -150,6 +166,42 @@ export function ReportDetail({
           </ul>
         )}
       </div>
+
+      <Dialog.Root
+        open={viewingImage !== null}
+        onOpenChange={(open) => !open && setViewingImage(null)}
+      >
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-[80] bg-black/85 backdrop-blur-sm transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+          <Dialog.Viewport className="fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-8">
+            <Dialog.Popup className="relative flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/15 bg-black shadow-2xl outline-none transition duration-200 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
+              <Dialog.Title className="sr-only">Evidence photo viewer</Dialog.Title>
+              <Dialog.Description className="sr-only">
+                Enlarged view of {viewingImage?.alt ?? "the selected evidence photo"}.
+              </Dialog.Description>
+              <Dialog.Close
+                className="absolute right-3 top-3 z-10 flex size-10 items-center justify-center rounded-full bg-black/70 text-white shadow-lg transition-colors hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                aria-label="Close photo viewer"
+              >
+                <X className="size-5" />
+              </Dialog.Close>
+              {viewingImage ? (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={viewingImage.src}
+                    alt={viewingImage.alt}
+                    className="max-h-[82vh] w-full object-contain"
+                  />
+                  <p className="truncate border-t border-white/10 px-4 py-3 text-sm text-white/80">
+                    {viewingImage.alt}
+                  </p>
+                </>
+              ) : null}
+            </Dialog.Popup>
+          </Dialog.Viewport>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       {report.intelligence && report.intelligence.aircraftNearby.length > 0 ? (
         <div>
