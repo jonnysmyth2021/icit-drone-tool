@@ -6,6 +6,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ChevronLeft, LayoutDashboard } from "lucide-react"
 import { Brand } from "@/components/brand"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { getSession } from "@/lib/store"
 
@@ -55,7 +56,8 @@ export function StepShell({
             )}
           </div>
           <Brand size="sm" />
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-1">
+            <ThemeToggle />
             {isReviewer ? (
               <Button variant="ghost" size="sm" onClick={() => router.push("/review")}>
                 <LayoutDashboard className="size-4" />

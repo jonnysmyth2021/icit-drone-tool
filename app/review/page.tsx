@@ -8,6 +8,7 @@ import { BarChart3, ChevronLeft, ListChecks, LogOut, Plus, RadioTower, RefreshCw
 import { toast } from "sonner"
 
 import { Brand } from "@/components/brand"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { ReportDetail } from "@/components/review/report-detail"
 import { ReportsMap } from "@/components/review/reports-map"
 import { AnalyticsPanel } from "@/components/review/analytics-panel"
@@ -185,6 +186,7 @@ export default function ReviewPage() {
             </span>
           </div>
           <div className="flex items-center gap-1">
+            <ThemeToggle />
             <Button variant="secondary" size="sm" onClick={() => router.push("/report")}>
               <Plus className="size-4" />
               <span className="hidden sm:inline">New sighting</span>

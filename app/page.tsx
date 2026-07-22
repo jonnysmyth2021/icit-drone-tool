@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { ArrowRight } from "lucide-react"
 import { Brand } from "@/components/brand"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -53,9 +54,12 @@ export default function LoginPage() {
 
       <header className="relative z-10 flex items-center justify-between px-5 py-4">
         <Brand />
-        <span className="rounded-full border border-border bg-card/60 px-3 py-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          Restricted
-        </span>
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <span className="rounded-full border border-border bg-card/60 px-3 py-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Restricted
+          </span>
+        </div>
       </header>
 
       <div className="relative z-10 flex flex-1 items-center justify-center px-5 pb-10">
