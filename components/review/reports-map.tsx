@@ -92,14 +92,28 @@ function markerHtml(
   </div>`
 }
 
-const AIRCRAFT_COLOR = "#facc15"
+const AIRCRAFT_ALTITUDE_BANDS = [
+  { maxFeet: 2_000, color: "#ef4444", label: "<2k ft" },
+  { maxFeet: 10_000, color: "#f97316", label: "2–10k" },
+  { maxFeet: 20_000, color: "#facc15", label: "10–20k" },
+  { maxFeet: 30_000, color: "#22d3ee", label: "20–30k" },
+  { maxFeet: Number.POSITIVE_INFINITY, color: "#a78bfa", label: "30k+" },
+] as const
+
+const UNKNOWN_ALTITUDE_COLOR = "#94a3b8"
+
+function aircraftColor(altitudeM: number | null) {
+  if (altitudeM == null) return UNKNOWN_ALTITUDE_COLOR
+  const altitudeFeet = altitudeM * 3.28084
+  return AIRCRAFT_ALTITUDE_BANDS.find((band) => altitudeFeet < band.maxFeet)?.color ?? UNKNOWN_ALTITUDE_COLOR
+}
 
 /** A top-down plane silhouette (nose pointing up) rotated to the aircraft's true track. */
-function aircraftIconHtml(heading: number | null) {
+function aircraftIconHtml(heading: number | null, color: string) {
   const rot = heading ?? 0
-  return `<div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:9999px;background:rgba(15,23,42,0.88);border:2px solid ${AIRCRAFT_COLOR};box-shadow:0 2px 8px rgba(0,0,0,0.55);">
+  return `<div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:9999px;background:rgba(15,23,42,0.88);border:2px solid ${color};box-shadow:0 2px 8px rgba(0,0,0,0.55);">
     <svg viewBox="0 0 24 24" width="34" height="34" style="transform:rotate(${rot}deg);filter:drop-shadow(0 1px 2px rgba(0,0,0,0.85));">
-      <path fill="${AIRCRAFT_COLOR}" stroke="#ffffff" stroke-width="0.65" stroke-linejoin="round" d="M12 2c.7 0 1.2.9 1.2 2.2v4.3l8 4.7v2l-8-2.4v4.5l2.2 1.6v1.6L12 19.8l-3.4 1.5v-1.6l2.2-1.6v-4.5l-8 2.4v-2l8-4.7V4.2C10.8 2.9 11.3 2 12 2z"/>
+      <path fill="${color}" stroke="#ffffff" stroke-width="0.65" stroke-linejoin="round" d="M12 2c.7 0 1.2.9 1.2 2.2v4.3l8 4.7v2l-8-2.4v4.5l2.2 1.6v1.6L12 19.8l-3.4 1.5v-1.6l2.2-1.6v-4.5l-8 2.4v-2l8-4.7V4.2C10.8 2.9 11.3 2 12 2z"/>
     </svg>
   </div>`
 }
@@ -324,27 +338,27 @@ export function ReportsMap({
 
     for (const a of liveAircraft) {
       if (typeof a.latitude !== "number" || typeof a.longitude !== "number") continue
-        const icon = L.divIcon({
-          className: "",
-          html: aircraftIconHtml(a.heading),
-          iconSize: [44, 44],
-          iconAnchor: [22, 22],
-        })
-        const altFt = a.altitude != null ? Math.round(a.altitude * 3.281) : null
-        const spdKt = a.velocity != null ? Math.round(a.velocity * 1.944) : null
-        L.marker([a.latitude, a.longitude], { icon, zIndexOffset: 2000 })
-          .bindTooltip(
-            `<strong>${a.callsign}</strong> · ${a.originCountry ?? a.registration ?? "Unknown"}` +
-              (altFt != null ? `<br/>${altFt.toLocaleString()} ft` : "") +
-              (spdKt != null ? ` · ${spdKt} kt` : "") +
-              `<br/><span style="opacity:0.7">Live ${a.provider === "opensky" ? "OpenSky" : "Airplanes.live"} position</span>` +
-              (aircraftUpdatedAt
-                ? `<br/><span style="opacity:0.7">Updated ${new Date(aircraftUpdatedAt).toLocaleTimeString("en-GB")}</span>`
-                : ""),
-            { direction: "top" },
-          )
-          .addTo(layer)
-        plotted++
+      const icon = L.divIcon({
+        className: "",
+        html: aircraftIconHtml(a.heading, aircraftColor(a.altitude)),
+        iconSize: [44, 44],
+        iconAnchor: [22, 22],
+      })
+      const altFt = a.altitude != null ? Math.round(a.altitude * 3.281) : null
+      const spdKt = a.velocity != null ? Math.round(a.velocity * 1.944) : null
+      L.marker([a.latitude, a.longitude], { icon, zIndexOffset: 2000 })
+        .bindTooltip(
+          `<strong>${a.callsign}</strong> · ${a.originCountry ?? a.registration ?? "Unknown"}` +
+            (altFt != null ? `<br/>${altFt.toLocaleString()} ft` : "") +
+            (spdKt != null ? ` · ${spdKt} kt` : "") +
+            `<br/><span style="opacity:0.7">Live ${a.provider === "opensky" ? "OpenSky" : "Airplanes.live"} position</span>` +
+            (aircraftUpdatedAt
+              ? `<br/><span style="opacity:0.7">Updated ${new Date(aircraftUpdatedAt).toLocaleTimeString("en-GB")}</span>`
+              : ""),
+          { direction: "top" },
+        )
+        .addTo(layer)
+      plotted++
     }
 
     setAircraftCount(plotted)
@@ -625,11 +639,25 @@ export function ReportsMap({
             <span className="text-foreground">Heading toward drone</span>
           </li>
           {showAircraft && (
-            <li className="flex items-center gap-1.5">
-              <Plane className="size-3 text-foreground" aria-hidden />
-              <span className="text-foreground">
-                Live aircraft{aircraftProvider === "airplaneslive" ? " (Airplanes.live)" : ""}
-              </span>
+            <li className="mt-1 border-t border-border pt-1.5">
+              <div className="flex items-center gap-1.5">
+                <Plane className="size-3 text-foreground" aria-hidden />
+                <span className="text-foreground">
+                  Aircraft altitude{aircraftProvider === "airplaneslive" ? " · Airplanes.live" : ""}
+                </span>
+              </div>
+              <div className="mt-1.5 grid grid-cols-3 gap-x-2 gap-y-1" aria-label="Aircraft altitude colours">
+                {AIRCRAFT_ALTITUDE_BANDS.map((band) => (
+                  <span key={band.label} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <span className="size-2 rounded-full" style={{ backgroundColor: band.color }} aria-hidden />
+                    {band.label}
+                  </span>
+                ))}
+                <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <span className="size-2 rounded-full" style={{ backgroundColor: UNKNOWN_ALTITUDE_COLOR }} aria-hidden />
+                  Unknown
+                </span>
+              </div>
             </li>
           )}
           {showUas && (
