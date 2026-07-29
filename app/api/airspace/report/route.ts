@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     if (!body.reportId) throw new Error("reportId is required.")
     const { data: report, error } = await auth.supabase
       .from("reports")
-      .select("id, latitude, longitude, submitted_at, created_at")
+      .select("id, organisation_id, latitude, longitude, submitted_at, created_at")
       .eq("id", body.reportId)
       .single()
     if (error || !report || report.latitude == null || report.longitude == null) {
@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
     const assessment = await airspaceService.assessRisk(query)
     const { error: insertError } = await auth.supabase.from("risk_assessments").insert({
       report_id: report.id,
+      organisation_id: report.organisation_id,
       user_id: auth.user.id,
       latitude: query.lat,
       longitude: query.lon,

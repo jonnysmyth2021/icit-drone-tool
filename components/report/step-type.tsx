@@ -39,7 +39,7 @@ export function StepType({
     <StepShell
       stepIndex={stepIndex}
       stepCount={stepCount}
-      eyebrow="Step 1 — Identification"
+      eyebrow={`Step ${stepIndex + 1} of ${stepCount}`}
       title="What do you see?"
       subtitle="Pick the closest match. We'll move on automatically."
     >

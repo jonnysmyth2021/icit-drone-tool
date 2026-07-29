@@ -35,6 +35,7 @@ const STATUS_FILTERS: { value: ReportStatus | "all"; label: string }[] = [
 export default function ReviewPage() {
   const router = useRouter()
   const [authorized, setAuthorized] = useState<boolean | null>(null)
+  const [role, setRole] = useState<"reviewer" | "super_admin" | null>(null)
   const [reports, setReports] = useState<DroneReport[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -57,12 +58,13 @@ export default function ReviewPage() {
         router.replace("/")
         return
       }
-      if (session.role !== "admin") {
+      if (session.role !== "reviewer" && session.role !== "super_admin") {
         setAuthorized(false)
         return
       }
 
       if (!localSession) setSession(session)
+      setRole(session.role)
       setAuthorized(true)
       void refresh()
     }
@@ -206,6 +208,12 @@ export default function ReviewPage() {
               <Plus className="size-4" />
               <span className="hidden sm:inline">New sighting</span>
             </Button>
+            {role === "super_admin" ? (
+              <Button variant="secondary" size="sm" onClick={() => router.push("/admin")}>
+                <ShieldCheck className="size-4" />
+                <span className="hidden sm:inline">Super Admin</span>
+              </Button>
+            ) : null}
             <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading}>
               <RefreshCw className={cn("size-4", loading && "animate-spin")} />
               <span className="hidden sm:inline">Refresh</span>

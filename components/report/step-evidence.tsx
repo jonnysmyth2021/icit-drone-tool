@@ -45,7 +45,7 @@ export function StepEvidence({
     <StepShell
       stepIndex={stepIndex}
       stepCount={stepCount}
-      eyebrow="Step 4 — Evidence"
+      eyebrow={`Step ${stepIndex + 1} of ${stepCount}`}
       title="Capture evidence"
       subtitle="Photos and video are timestamped and any embedded EXIF / GPS metadata is extracted automatically."
       onBack={onBack}

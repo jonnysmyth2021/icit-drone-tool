@@ -168,6 +168,69 @@
   }
 }
 
+/* Reporter-only visual system. Scoped to workflow shells and their portal so
+   the reviewer/admin interface keeps its existing operational palette. */
+.reporter-theme {
+  color-scheme: light;
+  --background: oklch(0.94 0.008 60);
+  --foreground: oklch(0.2 0.01 60);
+  --card: oklch(0.975 0.006 60);
+  --card-foreground: oklch(0.2 0.01 60);
+  --popover: oklch(0.975 0.006 60);
+  --popover-foreground: oklch(0.2 0.01 60);
+  --primary: oklch(0.66 0.19 44);
+  --primary-foreground: oklch(0.16 0.02 44);
+  --secondary: oklch(0.88 0.01 60);
+  --secondary-foreground: oklch(0.24 0.01 60);
+  --muted: oklch(0.88 0.01 60);
+  --muted-foreground: oklch(0.47 0.012 60);
+  --accent: oklch(0.66 0.19 44);
+  --accent-foreground: oklch(0.16 0.02 44);
+  --border: oklch(0.72 0.012 60);
+  --input: oklch(0.72 0.012 60);
+  --ring: oklch(0.66 0.19 44);
+}
+
+.dark .reporter-theme {
+  color-scheme: dark;
+  --background: oklch(0.235 0.006 60);
+  --foreground: oklch(0.97 0.004 60);
+  --card: oklch(0.265 0.006 60);
+  --card-foreground: oklch(0.97 0.004 60);
+  --popover: oklch(0.265 0.006 60);
+  --popover-foreground: oklch(0.97 0.004 60);
+  --primary: oklch(0.7 0.19 44);
+  --primary-foreground: oklch(0.15 0.02 44);
+  --secondary: oklch(0.32 0.006 60);
+  --secondary-foreground: oklch(0.97 0.004 60);
+  --muted: oklch(0.32 0.006 60);
+  --muted-foreground: oklch(0.75 0.008 60);
+  --accent: oklch(0.7 0.19 44);
+  --accent-foreground: oklch(0.15 0.02 44);
+  --border: oklch(0.48 0.008 60);
+  --input: oklch(0.48 0.008 60);
+  --ring: oklch(0.7 0.19 44);
+}
+
+.reporter-brand span:last-child {
+  color: var(--primary);
+}
+
+.reporter-theme-toggle [data-slot="button"] {
+  width: 100%;
+  height: 100%;
+  color: var(--foreground);
+}
+
+.reporter-footer [data-slot="button"] {
+  min-height: 3.5rem;
+  border-radius: 0.875rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 28px color-mix(in oklab, var(--primary) 22%, transparent);
+}
+
 /* Apple-style location dot + heading arc for Leaflet */
 .user-location-marker {
   position: relative;

@@ -37,7 +37,7 @@ export function StepLights({
     <StepShell
       stepIndex={stepIndex}
       stepCount={stepCount}
-      eyebrow="Step 2 — Lighting"
+      eyebrow={`Step ${stepIndex + 1} of ${stepCount}`}
       title="Lights visible?"
       subtitle={
         showColors

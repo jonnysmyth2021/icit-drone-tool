@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { requireAuthContext } from "@/lib/auth/server"
 import { AIRSPACE_RISK_ENGINE_VERSION } from "@/lib/airspace/risk-engine"
 import { airspaceService } from "@/lib/airspace/service"
 import type { AirspaceRiskAssessment } from "@/lib/airspace"
@@ -51,21 +52,16 @@ type EnrichmentRow = {
 }
 
 async function getAuthenticatedUser() {
-  const supabase = await createClient()
-  const { data, error } = await supabase.auth.getUser()
-  if (error || !data.user) throw new Error("You must be signed in to access reports.")
-  return { supabase, user: data.user }
+  const { supabase, context } = await requireAuthContext()
+  return {
+    supabase,
+    user: { id: context.userId, app_metadata: { role: context.role } },
+    context,
+  }
 }
 
-async function isReviewer(supabase: SupabaseClient, userId: string, metadataRole: unknown) {
-  const { data } = await supabase
-    .from("user_profiles")
-    .select("role")
-    .eq("user_id", userId)
-    .maybeSingle()
-
-  if (data) return data.role === "reviewer" || data.role === "admin"
-  return metadataRole === "admin" || metadataRole === "reviewer"
+async function isReviewer(_supabase: SupabaseClient, _userId: string, metadataRole: unknown) {
+  return metadataRole === "super_admin" || metadataRole === "reviewer"
 }
 
 function dataUrlToUpload(item: EvidenceItem) {
@@ -76,6 +72,7 @@ function dataUrlToUpload(item: EvidenceItem) {
 
 async function saveMedia(
   supabase: SupabaseClient,
+  organisationId: string,
   userId: string,
   reportId: string,
   evidence: EvidenceItem[],
@@ -86,7 +83,7 @@ async function saveMedia(
     if (!upload) continue
 
     const extension = upload.mimeType === "image/png" ? "png" : "jpg"
-    const filePath = `${userId}/${reportId}/${item.id}.${extension}`
+    const filePath = `${organisationId}/${userId}/${reportId}/${item.id}.${extension}`
     const { error: uploadError } = await supabase.storage
       .from("report-media")
       .upload(filePath, upload.bytes, { contentType: upload.mimeType, upsert: false })
@@ -94,6 +91,7 @@ async function saveMedia(
 
     const { error: mediaError } = await supabase.from("report_media").insert({
       report_id: reportId,
+      organisation_id: organisationId,
       user_id: userId,
       file_path: filePath,
       file_type: item.kind,
@@ -217,7 +215,7 @@ function approximateAltitudeMetres(altitude: DroneReport["altitude"]) {
 export async function createReport(
   report: DroneReport,
 ): Promise<{ ok: true; intelligence: DroneReport["intelligence"] }> {
-  const { supabase, user } = await getAuthenticatedUser()
+  const { supabase, user, context } = await getAuthenticatedUser()
   const location = report.location
   const intelligence = report.intelligence
   let airspaceAssessment: AirspaceRiskAssessment | null = null
@@ -241,6 +239,7 @@ export async function createReport(
     id: report.id,
     user_id: user.id,
     reporter_id: user.id,
+    organisation_id: context.organisationId,
     remote_id: { reference: report.reference },
     type: report.droneType,
     height: report.altitude,
@@ -282,7 +281,13 @@ export async function createReport(
 
   if (error) throw new Error(`Unable to save report: ${error.message}`)
 
-  const storedMedia = await saveMedia(supabase, user.id, report.id, report.evidence)
+  const storedMedia = await saveMedia(
+    supabase,
+    context.organisationId,
+    user.id,
+    report.id,
+    report.evidence,
+  )
   let finalIntelligence = intelligence
   if (intelligence && storedMedia.some((media) => media.mime_type.startsWith("image/"))) {
     try {
@@ -325,6 +330,7 @@ export async function createReport(
         }
     const { error: enrichmentError } = await supabase.from("report_enrichment").insert({
       report_id: report.id,
+      organisation_id: context.organisationId,
       source: finalIntelligence?.visualEvidence
         ? "icit-intelligence-v2-visual"
         : "icit-intelligence-v1",
@@ -356,6 +362,7 @@ export async function createReport(
   if (airspaceAssessment) {
     const { error: riskError } = await supabase.from("risk_assessments").insert({
       report_id: report.id,
+      organisation_id: context.organisationId,
       user_id: user.id,
       latitude: location.lat,
       longitude: location.lng,
@@ -373,6 +380,21 @@ export async function createReport(
         message: riskError.message,
       })
     }
+  }
+
+  const { error: auditError } = await supabase.from("audit_logs").insert({
+    organisation_id: context.organisationId,
+    performed_by: user.id,
+    action: "report.submitted",
+    entity: "report",
+    entity_id: report.id,
+    metadata: { reference: report.reference },
+  })
+  if (auditError) {
+    console.error("[icit] report submitted but audit insert failed", {
+      reportId: report.id,
+      message: auditError.message,
+    })
   }
 
   return { ok: true, intelligence: finalIntelligence }
@@ -445,18 +467,20 @@ async function mediaToEvidence(supabase: SupabaseClient, media: MediaRow): Promi
   }
 }
 
-export async function listReports(): Promise<DroneReport[]> {
+async function loadReports(ownOnly: boolean): Promise<DroneReport[]> {
   const { supabase, user } = await getAuthenticatedUser()
-  if (!(await isReviewer(supabase, user.id, user.app_metadata?.role))) {
+  if (!ownOnly && !(await isReviewer(supabase, user.id, user.app_metadata?.role))) {
     throw new Error("Only reviewers can list submitted reports.")
   }
 
-  const { data: rows, error } = await supabase
+  let query = supabase
     .from("reports")
     .select(
       "id, created_at, user_id, remote_id, type, height, has_lights, lights_visible, light_colors, latitude, longitude, location, status, observation, map_context, intelligence_summary",
     )
     .order("created_at", { ascending: false })
+  if (ownOnly) query = query.eq("reporter_id", user.id)
+  const { data: rows, error } = await query
   if (error) throw new Error(`Unable to load reports: ${error.message}`)
 
   const ids = (rows as ReportRow[]).map((row) => row.id)
@@ -517,6 +541,14 @@ export async function listReports(): Promise<DroneReport[]> {
       status: toAppStatus(row.status),
     }
   })
+}
+
+export async function listReports(): Promise<DroneReport[]> {
+  return loadReports(false)
+}
+
+export async function listMyReports(): Promise<DroneReport[]> {
+  return loadReports(true)
 }
 
 export async function analyzeReportPhotos(
@@ -633,7 +665,7 @@ export async function setReportStatus(
   status: ReportStatus,
   reviewerNote?: string,
 ): Promise<{ ok: true }> {
-  const { supabase, user } = await getAuthenticatedUser()
+  const { supabase, user, context } = await getAuthenticatedUser()
   if (!(await isReviewer(supabase, user.id, user.app_metadata?.role))) {
     throw new Error("Only reviewers can update report status.")
   }
@@ -653,13 +685,22 @@ export async function setReportStatus(
   if (error || !data) {
     throw new Error(`Unable to update report: ${error?.message ?? "Report not found"}`)
   }
+  const { error: auditError } = await supabase.from("audit_logs").insert({
+    organisation_id: context.organisationId,
+    performed_by: user.id,
+    action: "report.status_updated",
+    entity: "report",
+    entity_id: id,
+    metadata: { status },
+  })
+  if (auditError) throw new Error(`Report updated but audit logging failed: ${auditError.message}`)
   return { ok: true }
 }
 
 export async function deleteReport(
   id: string,
 ): Promise<{ ok: true; cleanupWarning?: string }> {
-  const { supabase, user } = await getAuthenticatedUser()
+  const { supabase, user, context } = await getAuthenticatedUser()
   if (!(await isReviewer(supabase, user.id, user.app_metadata?.role))) {
     throw new Error("Only reviewers can delete reports.")
   }
@@ -675,6 +716,14 @@ export async function deleteReport(
   if (error || !data) {
     throw new Error(`Unable to delete report: ${error?.message ?? "Report not found"}`)
   }
+  const { error: auditError } = await supabase.from("audit_logs").insert({
+    organisation_id: context.organisationId,
+    performed_by: user.id,
+    action: "report.deleted",
+    entity: "report",
+    entity_id: id,
+  })
+  if (auditError) throw new Error(`Report deleted but audit logging failed: ${auditError.message}`)
 
   const paths = (mediaRows ?? [])
     .map((row) => row.file_path)

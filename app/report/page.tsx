@@ -11,7 +11,6 @@ import { StepIntelligence } from "@/components/report/step-intelligence"
 import { StepLights } from "@/components/report/step-lights"
 import { StepLocation } from "@/components/report/step-location"
 import { StepType } from "@/components/report/step-type"
-import { VerdictBadge } from "@/components/report/verdict"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import {
@@ -147,7 +146,7 @@ export default function ReportPage() {
             <Dialog.Portal>
               <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
               <Dialog.Viewport className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                <Dialog.Popup className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center shadow-2xl outline-none transition duration-200 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
+                <Dialog.Popup className="reporter-theme relative w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center text-foreground shadow-2xl outline-none transition duration-200 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
                   <Dialog.Close
                     className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     aria-label="Close confirmation"
@@ -172,11 +171,6 @@ export default function ReportPage() {
                       <p className="mt-1 font-mono text-lg font-semibold text-primary">
                         {saved.reference}
                       </p>
-                      {saved.intelligence ? (
-                        <div className="mt-3 flex justify-center">
-                          <VerdictBadge verdict={saved.intelligence.verdict} />
-                        </div>
-                      ) : null}
                     </div>
                   ) : null}
                   <div className="mt-6 flex flex-col gap-2">
@@ -184,7 +178,7 @@ export default function ReportPage() {
                       <Plus className="size-4" />
                       Submit another sighting
                     </Dialog.Close>
-                    {session.role === "admin" ? (
+                    {session.role === "reviewer" || session.role === "super_admin" ? (
                       <Button variant="secondary" onClick={() => router.push("/review")}>
                         <LayoutDashboard className="size-4" />
                         Open reviewer dashboard

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { aircraftService } from "@/lib/aircraft"
+import { getAuthContext } from "@/lib/auth/server"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -13,6 +14,9 @@ function numberParam(value: string | null, fallback: number) {
 }
 
 export async function GET(request: Request) {
+  if (!(await getAuthContext())) {
+    return NextResponse.json({ error: "Authentication required." }, { status: 401 })
+  }
   const url = new URL(request.url)
   const lamin = Math.max(-90, numberParam(url.searchParams.get("lamin"), 49.5))
   const lomin = Math.max(-180, numberParam(url.searchParams.get("lomin"), -8.5))

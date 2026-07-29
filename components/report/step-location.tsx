@@ -323,7 +323,7 @@ export function StepLocation({
     <StepShell
       stepIndex={stepIndex}
       stepCount={stepCount}
-      eyebrow="Step 5 — Location"
+      eyebrow={`Step ${stepIndex + 1} of ${stepCount}`}
       title="Confirm location"
       subtitle="Drag the blue dot to your exact position, then point the arc toward the drone."
       onBack={onBack}

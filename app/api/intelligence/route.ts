@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { aircraftService } from "@/lib/aircraft"
+import { getAuthContext } from "@/lib/auth/server"
 import type {
   AircraftMatch,
   AstronomyMatch,
@@ -236,6 +237,9 @@ async function assessWithOpenAI(input: Record<string, unknown>): Promise<AiAsses
 }
 
 export async function POST(request: Request) {
+  if (!(await getAuthContext())) {
+    return NextResponse.json({ error: "Authentication required." }, { status: 401 })
+  }
   let lat = 51.5072
   let lng = -0.1276
   let observation: Record<string, unknown> = {}

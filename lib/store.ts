@@ -7,7 +7,10 @@ const SESSION_KEY = "icit-drone-session"
 
 export interface Session {
   user: string
-  role: "observer" | "admin"
+  role: "reporter" | "reviewer" | "super_admin"
+  organisationId: string
+  organisationName: string
+  permissions: string[]
   demo: boolean
 }
 

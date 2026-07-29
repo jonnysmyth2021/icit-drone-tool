@@ -31,7 +31,7 @@ export function StepAltitude({
     <StepShell
       stepIndex={stepIndex}
       stepCount={stepCount}
-      eyebrow="Step 3 — Altitude"
+      eyebrow={`Step ${stepIndex + 1} of ${stepCount}`}
       title="Approximate altitude"
       subtitle="Your best estimate of how high the craft was flying."
       onBack={onBack}

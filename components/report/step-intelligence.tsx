@@ -1,18 +1,27 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { AlertTriangle, Check, CloudSun, Loader2, Plane, Radar, RotateCcw, Satellite, Send, Sparkles, Wind } from "lucide-react"
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  FileCheck2,
+  Loader2,
+  Radar,
+  RotateCcw,
+  Send,
+  ShieldCheck,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { IntelligenceAssessment, ReportLocation } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { StepShell } from "./step-shell"
-import { VerdictBadge } from "./verdict"
 
 const PHASES = [
-  { key: "aircraft", label: "Detecting nearby aircraft", icon: Plane },
-  { key: "astronomy", label: "Matching astronomy & ISS", icon: Sparkles },
-  { key: "crossref", label: "Cross-referencing signatures", icon: Radar },
-  { key: "compile", label: "Compiling assessment", icon: Satellite },
+  { key: "details", label: "Securing report details", icon: FileCheck2 },
+  { key: "supporting", label: "Checking supporting data", icon: Radar },
+  { key: "evidence", label: "Preparing evidence package", icon: ShieldCheck },
+  { key: "compile", label: "Finalising submission", icon: CheckCircle2 },
 ]
 
 export function StepIntelligence({
@@ -31,7 +40,7 @@ export function StepIntelligence({
   location?: ReportLocation
   observation: Record<string, unknown>
   assessment: IntelligenceAssessment | null
-  onComplete: (a: IntelligenceAssessment) => void
+  onComplete: (assessment: IntelligenceAssessment) => void
   onSubmit: () => void
   onBack: () => void
   submitting: boolean
@@ -53,17 +62,16 @@ export function StepIntelligence({
 
     ;(async () => {
       try {
-        const res = await fetch("/api/intelligence", {
+        const response = await fetch("/api/intelligence", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ lat: location?.lat, lng: location?.lng, observation }),
         })
-        if (!res.ok) {
-          const body = (await res.json().catch(() => null)) as { error?: string } | null
-          throw new Error(body?.error ?? "AI assessment failed.")
+        if (!response.ok) {
+          const body = (await response.json().catch(() => null)) as { error?: string } | null
+          throw new Error(body?.error ?? "Report preparation failed.")
         }
-        const data = (await res.json()) as IntelligenceAssessment
-        // Ensure the animation has had a moment to play.
+        const data = (await response.json()) as IntelligenceAssessment
         timers.push(
           setTimeout(() => {
             setDone(true)
@@ -76,7 +84,7 @@ export function StepIntelligence({
             setError(
               requestError instanceof Error
                 ? requestError.message
-                : "AI assessment is temporarily unavailable.",
+                : "Report preparation is temporarily unavailable.",
             )
             setDone(true)
           }, 3200),
@@ -100,9 +108,9 @@ export function StepIntelligence({
     <StepShell
       stepIndex={stepIndex}
       stepCount={stepCount}
-      eyebrow="Step 6 — Intelligence"
-      title="Intelligence assessment"
-      subtitle="Cross-checking your sighting against live aircraft tracks and the night sky."
+      eyebrow={`Step ${stepIndex + 1} of ${stepCount}`}
+      title="Preparing your report"
+      subtitle="We’re securely packaging your sighting and supporting information for the ICIT review team."
       onBack={done ? onBack : undefined}
       footer={
         done && assessment ? (
@@ -114,211 +122,73 @@ export function StepIntelligence({
       }
     >
       {error ? (
-        <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-5 text-center">
+        <div className="rounded-2xl border border-destructive/40 bg-destructive/10 p-5 text-center">
           <AlertTriangle className="mx-auto size-7 text-destructive" />
-          <h2 className="mt-3 font-semibold">AI assessment unavailable</h2>
+          <h2 className="mt-3 font-semibold">Report preparation unavailable</h2>
           <p className="mt-1 text-sm text-muted-foreground">{error}</p>
           <Button variant="secondary" className="mt-4" onClick={retry}>
             <RotateCcw className="size-4" />
-            Retry assessment
+            Retry
           </Button>
         </div>
       ) : !done || !assessment ? (
         <ul className="flex flex-col gap-3">
-          {PHASES.map((p, i) => {
-            const active = i === phase
-            const complete = i < phase
-            const Icon = p.icon
+          {PHASES.map((item, index) => {
+            const active = index === phase
+            const complete = index < phase
+            const Icon = item.icon
             return (
               <li
-                key={p.key}
+                key={item.key}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg border p-4 transition-colors",
+                  "flex items-center gap-4 rounded-2xl border p-4 transition-colors",
                   active
-                    ? "border-primary/50 bg-primary/5"
+                    ? "border-primary/60 bg-primary/8"
                     : complete
-                      ? "border-border bg-card/60"
-                      : "border-border bg-card/30 opacity-60",
+                      ? "border-border bg-card/55"
+                      : "border-border bg-card/35 opacity-60",
                 )}
               >
                 <span
                   className={cn(
-                    "flex size-9 items-center justify-center rounded-lg",
-                    complete ? "bg-chart-3/20 text-chart-3" : "bg-secondary text-muted-foreground",
+                    "flex size-11 items-center justify-center rounded-xl",
+                    complete ? "bg-primary/15 text-primary" : "bg-secondary text-primary",
                   )}
                 >
                   {complete ? (
-                    <Check className="size-4" />
+                    <Check className="size-5" />
                   ) : active ? (
-                    <Loader2 className="size-4 animate-spin" />
+                    <Loader2 className="size-5 animate-spin" />
                   ) : (
-                    <Icon className="size-4" />
+                    <Icon className="size-5" />
                   )}
                 </span>
-                <span className="text-sm font-medium">{p.label}</span>
+                <span className="text-sm font-semibold">{item.label}</span>
               </li>
             )
           })}
         </ul>
       ) : (
-        <AssessmentResult assessment={assessment} />
+        <ReportReady />
       )}
     </StepShell>
   )
 }
 
-function AssessmentResult({ assessment }: { assessment: IntelligenceAssessment }) {
+function ReportReady() {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-xl border border-border bg-card/70 p-4">
-        <div className="flex items-center justify-between">
-          <VerdictBadge verdict={assessment.verdict} />
-          <span className="font-mono text-sm text-muted-foreground">
-            {Math.round(assessment.confidence * 100)}% conf.
-          </span>
-        </div>
-        <p className="mt-3 text-sm leading-relaxed text-foreground">{assessment.summary}</p>
-      </div>
-
-      {assessment.probabilities ? (
-        <div className="rounded-xl border border-border bg-card/70 p-4">
-          <p className="mb-3 text-sm font-medium">AI probability comparison</p>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              ["Drone", assessment.probabilities.drone],
-              ["Aircraft", assessment.probabilities.aircraft],
-              ["Astronomical", assessment.probabilities.astronomical],
-              ["Insufficient data", assessment.probabilities.inconclusive],
-            ].map(([label, value]) => (
-              <div key={String(label)} className="rounded-lg bg-secondary/60 p-3">
-                <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="mt-1 font-mono text-lg font-semibold text-primary">
-                  {Math.round(Number(value) * 100)}%
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {assessment.weather ? (
-        <div className="rounded-xl border border-border bg-card/70 p-4">
-          <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-            <CloudSun className="size-4 text-primary" />
-            Weather at report location
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-lg bg-secondary/60 p-3">
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Wind className="size-3.5" /> Wind
-              </p>
-              <p className="mt-1 font-mono text-lg font-semibold">
-                {assessment.weather.windSpeedMph} mph
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {assessment.weather.windSpeedMps.toFixed(1)} m/s
-                {assessment.weather.windDirectionDegrees != null
-                  ? ` · ${Math.round(assessment.weather.windDirectionDegrees)}°`
-                  : ""}
-              </p>
-            </div>
-            <div className="rounded-lg bg-secondary/60 p-3">
-              <p className="text-xs text-muted-foreground">Conditions</p>
-              <p className="mt-1 text-sm font-semibold capitalize">
-                {assessment.weather.conditions ?? "Current conditions"}
-              </p>
-              {assessment.weather.temperatureC != null ? (
-                <p className="text-xs text-muted-foreground">
-                  {Math.round(assessment.weather.temperatureC)}°C
-                </p>
-              ) : null}
-            </div>
-          </div>
-          {assessment.weather.windGustMph != null ? (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Gusting up to {assessment.weather.windGustMph} mph
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {assessment.reasoningFactors?.length ? (
-        <div className="rounded-xl border border-border bg-card/70 p-4">
-          <p className="mb-2 text-sm font-medium">AI evidence factors</p>
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            {assessment.reasoningFactors.map((factor) => (
-              <li key={factor} className="flex gap-2">
-                <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary" />
-                <span>{factor}</span>
-              </li>
-            ))}
-          </ul>
-          {assessment.recommendedAction ? (
-            <p className="mt-3 border-t border-border pt-3 text-sm">
-              <span className="font-medium">Recommended action:</span>{" "}
-              <span className="text-muted-foreground">{assessment.recommendedAction}</span>
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="rounded-xl border border-border bg-card/70 p-4">
-        <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-          <Plane className="size-4 text-accent" />
-          Nearby aircraft ({assessment.aircraftNearby.length})
-        </div>
-        {assessment.aircraftNearby.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No tracked crewed aircraft in the area.</p>
-        ) : (
-          <ul className="flex flex-col divide-y divide-border">
-            {assessment.aircraftNearby.map((a) => (
-              <li key={a.icao24} className="flex items-center justify-between py-2 text-sm">
-                <span className="font-mono">{a.callsign}</span>
-                <span className="text-muted-foreground">
-                  {a.distanceKm} km{a.altitude ? ` · ${Math.round(a.altitude)} m` : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="rounded-xl border border-border bg-card/70 p-4">
-        <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-          <Sparkles className="size-4 text-primary" />
-          Astronomy matches
-        </div>
-        {assessment.astronomyMatches.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No bright satellites or celestial bodies likely to be confused.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {assessment.astronomyMatches.map((m) => (
-              <li key={m.body} className="text-sm">
-                <span className="font-medium">{m.body}</span>
-                <span className="mt-0.5 block text-muted-foreground">{m.note}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {assessment.dataSources.map((s) => (
-          <span
-            key={s.name}
-            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/50 px-2.5 py-1 text-[11px] text-muted-foreground"
-          >
-            <span
-              className={cn(
-                "size-1.5 rounded-full",
-                s.status === "ok" ? "bg-chart-3" : "bg-accent",
-              )}
-            />
-            {s.name}
-          </span>
-        ))}
+    <div className="rounded-2xl border border-primary/45 bg-card/55 p-6 text-center shadow-sm">
+      <span className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-primary/15 text-primary">
+        <CheckCircle2 className="size-8" />
+      </span>
+      <h2 className="mt-5 text-xl font-semibold">Report checks complete</h2>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        Your sighting is ready to submit. The ICIT review team will assess the evidence and
+        supporting information.
+      </p>
+      <div className="mt-5 flex items-center justify-center gap-2 border-t border-border pt-4 text-xs font-medium text-muted-foreground">
+        <ShieldCheck className="size-4 text-primary" />
+        Decision information is available only to authorised reviewers
       </div>
     </div>
   )

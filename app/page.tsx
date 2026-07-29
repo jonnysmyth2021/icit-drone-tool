@@ -38,7 +38,7 @@ export default function LoginPage() {
     }
 
     setSession(result.session)
-    router.push(result.session.role === "admin" ? "/review" : "/report")
+    router.push(result.session.role === "super_admin" ? "/admin" : result.session.role === "reviewer" ? "/review" : "/report")
   }
 
   return (

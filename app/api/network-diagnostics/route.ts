@@ -1,6 +1,8 @@
 import { lookup } from "node:dns/promises"
 import { connect } from "node:tls"
 import type { LookupAddress } from "node:dns"
+import { getAuthContext } from "@/lib/auth/server"
+import { NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
 
@@ -145,6 +147,10 @@ async function diagnoseHost(hostname: (typeof HOSTS)[number]) {
 }
 
 export async function GET() {
+  const auth = await getAuthContext()
+  if (!auth || auth.context.role !== "super_admin") {
+    return NextResponse.json({ error: "Super Admin access required." }, { status: 403 })
+  }
   const results = await Promise.all(HOSTS.map(diagnoseHost))
 
   return Response.json(
