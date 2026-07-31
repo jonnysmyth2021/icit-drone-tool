@@ -123,7 +123,10 @@ export async function createOrganisation(input: {
     analytics_enabled: input.analyticsEnabled,
     review_required: input.reviewRequired,
   })
-  if (settingsError) throw new Error(settingsError.message)
+  if (settingsError) {
+    await supabase.from("organisations").delete().eq("id", data.id)
+    throw new Error(`Unable to create organisation settings: ${settingsError.message}`)
+  }
   await audit(supabase, context, "organisation.created", "organisation", data.id, data.id, {
     name: input.name,
   })
@@ -190,39 +193,6 @@ export async function deleteOrganisation(id: string) {
   return { ok: true }
 }
 
-export async function inviteUser(input: {
-  email: string
-  organisationId: string
-  role: AdminRole
-  redirectTo?: string
-}) {
-  const { supabase, context } = await requireSuperAdmin()
-  const admin = createAdminClient()
-  const { data, error } = await admin.auth.admin.inviteUserByEmail(input.email.trim().toLowerCase(), {
-    redirectTo: input.redirectTo,
-    data: { invited_by: context.userId },
-  })
-  if (error || !data.user) throw new Error(error?.message ?? "Unable to invite user.")
-  const { error: metadataError } = await admin.auth.admin.updateUserById(data.user.id, {
-    app_metadata: { organisation_id: input.organisationId, role: input.role },
-  })
-  if (metadataError) {
-    await admin.auth.admin.deleteUser(data.user.id)
-    throw new Error(metadataError.message)
-  }
-  const { error: profileError } = await supabase
-    .from("profiles")
-    .update({ organisation_id: input.organisationId, role: input.role, active: true })
-    .eq("user_id", data.user.id)
-  if (profileError) throw new Error(profileError.message)
-  await audit(supabase, context, "user.invited", "user", data.user.id, input.organisationId, {
-    email: input.email,
-    role: input.role,
-  })
-  revalidatePath("/admin")
-  return { ok: true }
-}
-
 export async function createUserWithPassword(input: {
   firstName: string
   lastName: string
@@ -239,6 +209,22 @@ export async function createUserWithPassword(input: {
   const email = input.email.trim().toLowerCase()
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
+  if (!email || !firstName || !lastName) {
+    throw new Error("First name, last name and email are required.")
+  }
+
+  const { data: organisation, error: organisationError } = await supabase
+    .from("organisations")
+    .select("id, status")
+    .eq("id", input.organisationId)
+    .single()
+  if (organisationError || !organisation) {
+    throw new Error("The selected organisation no longer exists.")
+  }
+  if (organisation.status !== "active") {
+    throw new Error("Activate the selected organisation before adding a user.")
+  }
+
   const admin = createAdminClient()
   const { data, error } = await admin.auth.admin.createUser({
     email,
@@ -256,7 +242,7 @@ export async function createUserWithPassword(input: {
   })
   if (error || !data.user) throw new Error(error?.message ?? "Unable to create user.")
 
-  const { error: profileError } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .update({
       first_name: firstName,
@@ -268,10 +254,12 @@ export async function createUserWithPassword(input: {
       updated_at: new Date().toISOString(),
     })
     .eq("user_id", data.user.id)
+    .select("user_id")
+    .single()
 
-  if (profileError) {
+  if (profileError || !profile) {
     await admin.auth.admin.deleteUser(data.user.id)
-    throw new Error(`User profile creation failed: ${profileError.message}`)
+    throw new Error(`User profile creation failed: ${profileError?.message ?? "profile record was not created"}`)
   }
 
   await audit(

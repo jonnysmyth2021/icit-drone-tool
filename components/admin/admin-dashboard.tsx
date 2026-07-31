@@ -26,7 +26,6 @@ import {
   createUserWithPassword,
   deleteOrganisation,
   deleteUser,
-  inviteUser,
   sendPasswordReset,
   setOrganisationStatus,
   setRolePermissions,
@@ -202,7 +201,7 @@ export function AdminDashboard({
 
           <TabsContent value="organisations">
             <PageHeading title="Organisations" description="Manage licences, capacity and tenant lifecycle." />
-            <CreateOrganisationForm disabled={pending} onSubmit={(input) => mutate(() => createOrganisation(input), "Organisation created.")} />
+            <CreateOrganisationForm disabled={pending} onSubmit={(input) => mutate(() => createOrganisation(input), "Organisation created. Open Users to add its first user.")} />
             {editingOrganisationId ? (
               <EditOrganisationForm
                 organisation={organisations.find((organisation) => organisation.id === editingOrganisationId)!}
@@ -259,8 +258,7 @@ export function AdminDashboard({
           </TabsContent>
 
           <TabsContent value="users">
-            <PageHeading title="Users" description="Invite personnel and manage tenant, role and account status." />
-            <InviteUserForm organisations={organisations} disabled={pending} onSubmit={(input) => mutate(() => inviteUser({ ...input, redirectTo: `${window.location.origin}/` }), "Invitation sent.")} />
+            <PageHeading title="Users" description="Create personnel accounts and manage tenant, role and account status." />
             <CreateUserForm
               organisations={organisations}
               disabled={pending}
@@ -431,22 +429,6 @@ function CreateOrganisationForm({ disabled, onSubmit }: { disabled: boolean; onS
   )
 }
 
-function InviteUserForm({ organisations, disabled, onSubmit }: { organisations: DashboardData["organisations"]; disabled: boolean; onSubmit: (input: { email: string; organisationId: string; role: AdminRole }) => void }) {
-  return (
-    <Card><CardHeader><CardTitle>Invite user</CardTitle><CardDescription>Invitation metadata securely assigns tenant and role.</CardDescription></CardHeader><CardContent>
-      <form className="grid gap-3 md:grid-cols-[2fr_1fr_1fr_auto]" onSubmit={(event) => {
-        event.preventDefault(); const data = new FormData(event.currentTarget)
-        onSubmit({ email: String(data.get("email")), organisationId: String(data.get("organisationId")), role: String(data.get("role")) as AdminRole })
-      }}>
-        <Input name="email" type="email" placeholder="e.g. officer@organisation.gov.uk" required />
-        <select name="organisationId" className="h-9 rounded-md border border-input bg-background px-3" required>{organisations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}</select>
-        <select name="role" className="h-9 rounded-md border border-input bg-background px-3">{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-        <Button type="submit" disabled={disabled}>Send invite</Button>
-      </form>
-    </CardContent></Card>
-  )
-}
-
 function CreateUserForm({
   organisations,
   disabled,
@@ -512,8 +494,12 @@ function CreateUserForm({
               required
             >
               {organisations.map((organisation) => (
-                <option key={organisation.id} value={organisation.id}>
-                  {organisation.name}
+                <option
+                  key={organisation.id}
+                  value={organisation.id}
+                  disabled={organisation.status !== "active"}
+                >
+                  {organisation.name}{organisation.status !== "active" ? " (inactive)" : ""}
                 </option>
               ))}
             </select>
