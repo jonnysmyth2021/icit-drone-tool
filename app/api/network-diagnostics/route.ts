@@ -159,7 +159,7 @@ export async function GET() {
       generatedAt: new Date().toISOString(),
       runtime: {
         node: process.version,
-        platform: process.env.NETLIFY ? "netlify" : process.env.VERCEL ? "vercel" : "other",
+        platform: process.env.VERCEL ? "vercel" : "local",
         region: process.env.AWS_REGION ?? process.env.VERCEL_REGION ?? null,
       },
       timeoutMs: CONNECT_TIMEOUT_MS,

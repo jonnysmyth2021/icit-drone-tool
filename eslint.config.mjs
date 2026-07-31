@@ -9,5 +9,5 @@ export default defineConfig([
       "react-hooks/set-state-in-effect": "off",
     },
   },
-  globalIgnores([".next/**", ".netlify/**", "node_modules/**"]),
+  globalIgnores([".next/**", "node_modules/**"]),
 ])
