@@ -146,7 +146,16 @@ export function AdminDashboard({
   function mutate(task: () => Promise<unknown>, success: string) {
     startTransition(async () => {
       try {
-        await task()
+        const result = await task()
+        if (
+          result &&
+          typeof result === "object" &&
+          "ok" in result &&
+          result.ok === false
+        ) {
+          const message = "error" in result ? String(result.error) : "Action failed."
+          throw new Error(message)
+        }
         toast.success(success)
         router.refresh()
       } catch (error) {
