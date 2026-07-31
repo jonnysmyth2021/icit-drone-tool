@@ -7,6 +7,8 @@ import {
   BarChart3,
   Building2,
   Database,
+  Eye,
+  EyeOff,
   FileClock,
   FileText,
   KeyRound,
@@ -263,7 +265,10 @@ export function AdminDashboard({
               organisations={organisations}
               disabled={pending}
               onSubmit={(input) =>
-                mutate(() => createUserWithPassword(input), "User created and ready to sign in.")
+                mutate(async () => {
+                  const result = await createUserWithPassword(input)
+                  if (!result.ok) throw new Error(result.error)
+                }, "User created and ready to sign in.")
               }
             />
             <div className="relative mt-5 max-w-sm">
@@ -438,6 +443,8 @@ function CreateUserForm({
   disabled: boolean
   onSubmit: (input: Parameters<typeof createUserWithPassword>[0]) => void
 }) {
+  const [showPassword, setShowPassword] = useState(false)
+
   return (
     <Card className="mt-4">
       <CardHeader>
@@ -478,14 +485,26 @@ function CreateUserForm({
             />
           </Field>
           <Field label="Temporary password">
-            <Input
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              minLength={12}
-              placeholder="Minimum 12 characters"
-              required
-            />
+            <div className="relative">
+              <Input
+                name="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                minLength={12}
+                placeholder="Minimum 12 characters"
+                className="pr-10"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                aria-label={showPassword ? "Hide temporary password" : "Show temporary password"}
+                aria-pressed={showPassword}
+              >
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
           </Field>
           <Field label="Organisation">
             <select

@@ -193,14 +193,30 @@ export async function deleteOrganisation(id: string) {
   return { ok: true }
 }
 
-export async function createUserWithPassword(input: {
+export type CreateUserInput = {
   firstName: string
   lastName: string
   email: string
   password: string
   organisationId: string
   role: AdminRole
-}) {
+}
+
+type AdminActionError = Error & { code?: string; status?: number }
+
+function userCreationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/already (been )?registered|already exists|email.*exists/i.test(message)) {
+    return "A user with this email address already exists."
+  }
+  if (/password/i.test(message)) return message
+  if (/profile creation failed/i.test(message)) return message
+  if (/organisation/i.test(message)) return message
+  if (/super admin access|required|permission/i.test(message)) return message
+  return "Unable to create the user. Check the server log for the Supabase error code."
+}
+
+async function createUserWithPasswordInternal(input: CreateUserInput) {
   const { supabase, context } = await requireSuperAdmin()
   if (input.password.length < 12) {
     throw new Error("The temporary password must contain at least 12 characters.")
@@ -272,7 +288,28 @@ export async function createUserWithPassword(input: {
     { email, role: input.role },
   )
   revalidatePath("/admin")
-  return { ok: true }
+  return { ok: true as const }
+}
+
+export async function createUserWithPassword(
+  input: CreateUserInput,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    return await createUserWithPasswordInternal(input)
+  } catch (error) {
+    const detail = error as AdminActionError
+    console.error("[icit] super admin user creation failed", {
+      name: detail?.name,
+      message: detail?.message ?? String(error),
+      code: detail?.code,
+      status: detail?.status,
+      stack: detail?.stack,
+      emailDomain: input.email.includes("@") ? input.email.split("@").at(-1) : undefined,
+      organisationId: input.organisationId,
+      role: input.role,
+    })
+    return { ok: false, error: userCreationError(error) }
+  }
 }
 
 export async function updateUser(input: {
