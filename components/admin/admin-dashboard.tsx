@@ -61,6 +61,30 @@ const roleLabels: Record<AdminRole, string> = {
   super_admin: "Super Admin",
 }
 
+const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "Europe/London",
+})
+
+const dateFormatter = new Intl.DateTimeFormat("en-GB", {
+  dateStyle: "medium",
+  timeZone: "Europe/London",
+})
+
+const weekdayFormatter = new Intl.DateTimeFormat("en-GB", {
+  weekday: "short",
+  timeZone: "Europe/London",
+})
+
+function formatDateTime(value: string) {
+  return dateTimeFormatter.format(new Date(value))
+}
+
+function formatDate(value: string) {
+  return dateFormatter.format(new Date(value))
+}
+
 function organisationName(value: unknown) {
   const item = Array.isArray(value) ? value[0] : value
   return item && typeof item === "object" && "name" in item ? String(item.name) : "Unknown"
@@ -181,7 +205,7 @@ export function AdminDashboard({
 
         <section className="min-w-0 p-4 md:p-7">
           <TabsContent value="overview">
-            <PageHeading title="Platform overview" description={`Live platform position as of ${new Date(initialData.generatedAt).toLocaleString()}.`} />
+            <PageHeading title="Platform overview" description={`Live platform position as of ${formatDateTime(initialData.generatedAt)}.`} />
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {stats.map(({ label, value, icon: Icon }) => (
                 <Card key={label}>
@@ -237,7 +261,7 @@ export function AdminDashboard({
                         <td className="px-4 py-3">{reportCount}</td>
                         <td className="px-4 py-3">{formatBytes(bytes)} / {org.storage_limit_gb} GB</td>
                         <td className="px-4 py-3 capitalize">{org.licence_type}</td>
-                        <td className="px-4 py-3">{org.expires_at ? new Date(org.expires_at).toLocaleDateString() : "No expiry"}</td>
+                        <td className="px-4 py-3">{org.expires_at ? formatDate(org.expires_at) : "No expiry"}</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2">
                             <Button size="sm" variant="ghost" disabled={pending} onClick={() => setEditingOrganisationId(org.id)}>
@@ -338,7 +362,7 @@ export function AdminDashboard({
                 <tbody>
                   {initialData.audits.map((entry) => (
                     <tr key={entry.id} className="border-t border-border">
-                      <td className="px-4 py-3 whitespace-nowrap">{new Date(entry.created_at).toLocaleString()}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{formatDateTime(entry.created_at)}</td>
                       <td className="px-4 py-3">{profiles.find((profile) => profile.user_id === entry.performed_by)?.email ?? "System"}</td>
                       <td className="px-4 py-3 font-mono text-xs">{entry.action}</td>
                       <td className="px-4 py-3">{entry.entity}{entry.entity_id ? ` · ${entry.entity_id}` : ""}</td>
@@ -383,7 +407,7 @@ function ActivityChart({ reports, generatedAt }: { reports: DashboardData["repor
     const date = new Date(generatedAt)
     date.setDate(date.getDate() - (13 - index))
     const key = date.toISOString().slice(0, 10)
-    return { key, label: date.toLocaleDateString(undefined, { weekday: "short" }), value: reports.filter((r) => r.created_at.startsWith(key)).length }
+    return { key, label: weekdayFormatter.format(date), value: reports.filter((r) => r.created_at.startsWith(key)).length }
   })
   const max = Math.max(1, ...days.map((day) => day.value))
   return (
@@ -595,7 +619,7 @@ function UserRow({ profile, organisations, currentUserId, disabled, onSave, onRe
     <td className="px-4 py-3">{[profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Unnamed user"}</td><td className="px-4 py-3">{profile.email}</td>
     <td className="px-4 py-3"><select value={organisationId} onChange={(e) => setOrganisationId(e.target.value)} className="rounded border border-input bg-background px-2 py-1">{organisations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}</select></td>
     <td className="px-4 py-3"><select value={role} onChange={(e) => setRole(e.target.value as AdminRole)} className="rounded border border-input bg-background px-2 py-1">{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
-    <td className="px-4 py-3"><StatusPill active={profile.active} label={profile.active ? "active" : "disabled"} /></td><td className="px-4 py-3">{profile.last_login ? new Date(profile.last_login).toLocaleString() : "Never"}</td>
+    <td className="px-4 py-3"><StatusPill active={profile.active} label={profile.active ? "active" : "disabled"} /></td><td className="px-4 py-3">{profile.last_login ? formatDateTime(profile.last_login) : "Never"}</td>
     <td className="px-4 py-3"><div className="flex gap-1"><Button size="sm" variant="secondary" disabled={disabled} onClick={() => onSave({ userId: profile.user_id, organisationId, role, active: profile.active })}>Save</Button><Button size="sm" variant="ghost" disabled={disabled || profile.user_id === currentUserId} onClick={() => onSave({ userId: profile.user_id, organisationId, role, active: !profile.active })}>{profile.active ? "Disable" : "Enable"}</Button><Button size="icon-sm" variant="ghost" disabled={disabled} onClick={onReset}><KeyRound className="size-4" /></Button><Button size="icon-sm" variant="ghost" disabled={disabled || profile.user_id === currentUserId} onClick={onDelete}><Trash2 className="size-4" /></Button></div></td>
   </tr>
 }

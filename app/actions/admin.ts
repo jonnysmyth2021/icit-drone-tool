@@ -258,24 +258,29 @@ async function createUserWithPasswordInternal(input: CreateUserInput) {
   })
   if (error || !data.user) throw new Error(error?.message ?? "Unable to create user.")
 
-  const { data: profile, error: profileError } = await supabase
+  // The auth.users trigger creates the tenant profile synchronously from the
+  // trusted app_metadata above. Verify that result instead of issuing a second
+  // RLS-controlled update, which can legitimately return zero visible rows.
+  const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .update({
-      first_name: firstName,
-      last_name: lastName,
-      email,
-      organisation_id: input.organisationId,
-      role: input.role,
-      active: true,
-      updated_at: new Date().toISOString(),
-    })
+    .select("user_id, email, first_name, last_name, organisation_id, role, active")
     .eq("user_id", data.user.id)
-    .select("user_id")
-    .single()
+    .maybeSingle()
 
   if (profileError || !profile) {
     await admin.auth.admin.deleteUser(data.user.id)
     throw new Error(`User profile creation failed: ${profileError?.message ?? "profile record was not created"}`)
+  }
+  if (
+    profile.email !== email ||
+    profile.first_name !== firstName ||
+    profile.last_name !== lastName ||
+    profile.organisation_id !== input.organisationId ||
+    profile.role !== input.role ||
+    !profile.active
+  ) {
+    await admin.auth.admin.deleteUser(data.user.id)
+    throw new Error("User profile creation failed: the Auth profile did not match the requested organisation and role.")
   }
 
   await audit(
